@@ -35,7 +35,12 @@ public class MetadataThreeNodeIntegrationTest {
         MetadataNode node3 = new MetadataNode(3, "127.0.0.1", port3, tempDir.resolve("n3").toFile(), peers, 1L);
         try {
             MetadataNode leader = awaitLeader(40, TimeUnit.SECONDS, node1, node2, node3);
-            leader.awaitRegistered(20, TimeUnit.SECONDS);
+            // Wait for every peer's RegisterNode to commit before mutating catalog state.
+            // Otherwise in-flight follower registrations race snapshot/digest checks.
+            node1.awaitRegistered(20, TimeUnit.SECONDS);
+            node2.awaitRegistered(20, TimeUnit.SECONDS);
+            node3.awaitRegistered(20, TimeUnit.SECONDS);
+            assertReplicasConverged(30, TimeUnit.SECONDS, node1, node2, node3);
 
             RaftStreamManager streamManager = new RaftStreamManager(leader);
             long streamId = streamManager.createStream().get(20, TimeUnit.SECONDS);
@@ -83,13 +88,16 @@ public class MetadataThreeNodeIntegrationTest {
         MetadataNode node3 = new MetadataNode(3, "127.0.0.1", port3, dir3.toFile(), peers, 1L);
         long streamId;
         try {
-            MetadataNode firstLeader = awaitLeader(40, TimeUnit.SECONDS, node1, node2, node3);
-            firstLeader.awaitRegistered(20, TimeUnit.SECONDS);
+            awaitLeader(40, TimeUnit.SECONDS, node1, node2, node3);
+            node1.awaitRegistered(20, TimeUnit.SECONDS);
+            node2.awaitRegistered(20, TimeUnit.SECONDS);
+            node3.awaitRegistered(20, TimeUnit.SECONDS);
 
             node3.close();
 
             MetadataNode leader = awaitLeader(40, TimeUnit.SECONDS, node1, node2);
-            leader.awaitRegistered(20, TimeUnit.SECONDS);
+            node1.awaitRegistered(20, TimeUnit.SECONDS);
+            node2.awaitRegistered(20, TimeUnit.SECONDS);
 
             RaftStreamManager streamManager = new RaftStreamManager(leader);
             streamId = streamManager.createStream().get(20, TimeUnit.SECONDS);

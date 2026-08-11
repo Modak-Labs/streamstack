@@ -11,11 +11,11 @@
     <name>streamstack</name>
 
     <modules>
-        <module>model</module>
         <module>stream</module>
         <module>metadata</module>
-        <module>client</module>
         <module>server</module>
+        <module>durable-streams</module>
+        <module>s2</module>
     </modules>
 
     <properties>
@@ -36,7 +36,7 @@
         <dependencies>
             <dependency>
                 <groupId>io.streamstack</groupId>
-                <artifactId>model</artifactId>
+                <artifactId>ds-model</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -51,12 +51,32 @@
             </dependency>
             <dependency>
                 <groupId>io.streamstack</groupId>
-                <artifactId>client</artifactId>
+                <artifactId>ds-client</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.streamstack</groupId>
                 <artifactId>server</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.streamstack</groupId>
+                <artifactId>ds-server</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.streamstack</groupId>
+                <artifactId>s2-model</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.streamstack</groupId>
+                <artifactId>s2-client</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.streamstack</groupId>
+                <artifactId>s2-server</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

@@ -1,19 +1,29 @@
 package io.streamstack.server.model;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public record ReadResult(
-    List<byte[]> messages,
+    List<StreamRecord> records,
     String contentType,
     OffsetToken nextOffset,
     boolean upToDate,
     boolean closed) {
 
     public ReadResult {
-        messages = messages == null ? List.of() : List.copyOf(messages);
+        records = records == null ? List.of() : List.copyOf(records);
+    }
+
+    public List<byte[]> payloads() {
+        List<byte[]> out = new ArrayList<>(records.size());
+        for (StreamRecord record : records) {
+            out.add(record.payload());
+        }
+        return out;
     }
 
     public byte[] concatenated() {
+        List<byte[]> messages = payloads();
         if (messages.isEmpty()) {
             return new byte[0];
         }
