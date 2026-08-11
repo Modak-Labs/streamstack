@@ -32,8 +32,6 @@ dependency-reduced-pom.xml
 *.log
 .env
 .env.*
-**/data/
-**/objects/
 
 ### Conformance / temp ###
 server/conformance-run.log
