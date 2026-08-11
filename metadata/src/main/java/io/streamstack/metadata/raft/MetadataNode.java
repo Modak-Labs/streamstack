@@ -11,8 +11,8 @@ import com.alipay.sofa.jraft.option.RaftOptions;
 import com.alipay.sofa.jraft.rpc.RaftRpcServerFactory;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 
-import io.streamstack.metadata.command.MetadataCommand;
-import io.streamstack.metadata.command.MetadataCommandCodec;
+import io.streamstack.metadata.model.MetadataCommand;
+import io.streamstack.metadata.codec.MetadataCommandCodec;
 import io.streamstack.metadata.rpc.MetadataCommandProcessor;
 import io.streamstack.s3.operator.ObjectStorage;
 

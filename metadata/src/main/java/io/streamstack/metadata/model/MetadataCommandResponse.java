@@ -1,4 +1,4 @@
-package io.streamstack.metadata.rpc;
+package io.streamstack.metadata.model;
 
 import java.io.Serializable;
 

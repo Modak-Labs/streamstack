@@ -1,7 +1,10 @@
-package io.streamstack.server.store;
+package io.streamstack.server.model;
 
 import java.util.Objects;
 
+/**
+ * Server-internal offset with record-index encoding.
+ */
 public final class OffsetToken {
     private static final int WIDTH = 20;
     private static final String BEGINNING = "-1";

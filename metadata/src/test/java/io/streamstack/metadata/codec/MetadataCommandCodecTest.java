@@ -1,4 +1,6 @@
-package io.streamstack.metadata.command;
+package io.streamstack.metadata.codec;
+
+import io.streamstack.metadata.model.MetadataCommand;
 
 import io.streamstack.s3.compact.CompactOperations;
 import io.streamstack.s3.objects.CommitStreamSetObjectRequest;

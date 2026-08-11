@@ -11,6 +11,7 @@
     <name>streamstack</name>
 
     <modules>
+        <module>model</module>
         <module>stream</module>
         <module>metadata</module>
         <module>client</module>
@@ -33,6 +34,11 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>io.streamstack</groupId>
+                <artifactId>model</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>io.streamstack</groupId>
                 <artifactId>stream</artifactId>

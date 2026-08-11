@@ -1,4 +1,4 @@
-package io.streamstack.metadata.rpc;
+package io.streamstack.metadata.codec;
 
 import io.streamstack.s3.metadata.StreamMetadata;
 import io.streamstack.s3.metadata.StreamState;

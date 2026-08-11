@@ -3,7 +3,7 @@ package io.streamstack.metadata.raft;
 import com.alipay.sofa.jraft.Closure;
 import com.alipay.sofa.jraft.Status;
 
-import io.streamstack.metadata.command.MetadataCommand;
+import io.streamstack.metadata.model.MetadataCommand;
 
 import java.util.concurrent.CompletableFuture;
 

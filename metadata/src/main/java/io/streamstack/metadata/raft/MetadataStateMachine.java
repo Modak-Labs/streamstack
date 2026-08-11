@@ -10,8 +10,8 @@ import com.alipay.sofa.jraft.storage.snapshot.SnapshotReader;
 import com.alipay.sofa.jraft.storage.snapshot.SnapshotWriter;
 
 import io.streamstack.metadata.MetadataException;
-import io.streamstack.metadata.command.MetadataCommand;
-import io.streamstack.metadata.command.MetadataCommandCodec;
+import io.streamstack.metadata.model.MetadataCommand;
+import io.streamstack.metadata.codec.MetadataCommandCodec;
 import io.streamstack.metadata.stream.KVControlManager;
 import io.streamstack.metadata.stream.S3ObjectControlManager;
 import io.streamstack.metadata.stream.StreamControlManager;

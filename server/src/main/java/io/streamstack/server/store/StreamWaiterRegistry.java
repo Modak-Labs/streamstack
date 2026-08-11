@@ -1,5 +1,7 @@
 package io.streamstack.server.store;
 
+import io.streamstack.server.model.OffsetToken;
+
 import java.time.Duration;
 import java.util.Iterator;
 import java.util.Map;

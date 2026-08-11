@@ -9,11 +9,11 @@ import com.alipay.sofa.jraft.option.CliOptions;
 import com.alipay.sofa.jraft.rpc.impl.cli.CliClientServiceImpl;
 
 import io.streamstack.metadata.MetadataException;
-import io.streamstack.metadata.command.MetadataCommand;
-import io.streamstack.metadata.command.MetadataCommandCodec;
-import io.streamstack.metadata.rpc.MetadataCommandRequest;
-import io.streamstack.metadata.rpc.MetadataCommandResponse;
-import io.streamstack.metadata.rpc.MetadataResultCodec;
+import io.streamstack.metadata.model.MetadataCommand;
+import io.streamstack.metadata.codec.MetadataCommandCodec;
+import io.streamstack.metadata.model.MetadataCommandRequest;
+import io.streamstack.metadata.model.MetadataCommandResponse;
+import io.streamstack.metadata.codec.MetadataResultCodec;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -1,4 +1,4 @@
-package io.streamstack.server.store;
+package io.streamstack.server.model;
 
 import java.time.Instant;
 

@@ -2,6 +2,7 @@ package io.streamstack.server.http;
 
 import io.javalin.http.Context;
 import io.streamstack.metadata.raft.MetadataNode;
+import io.streamstack.model.Protocol;
 import io.streamstack.s3.metadata.StreamMetadata;
 import io.streamstack.s3.metadata.StreamState;
 import io.streamstack.server.store.S3StreamStore;
@@ -31,7 +32,9 @@ public final class OwnershipRouter {
     }
 
     public void handle(Context ctx) {
-        if (mode == Mode.LOCAL_ALWAYS || "PUT".equals(ctx.method().name())) {
+        if (mode == Mode.LOCAL_ALWAYS
+            || "PUT".equals(ctx.method().name())
+            || "OPTIONS".equals(ctx.method().name())) {
             handler.handle(ctx);
             return;
         }

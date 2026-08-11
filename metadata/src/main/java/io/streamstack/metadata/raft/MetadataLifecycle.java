@@ -1,6 +1,6 @@
 package io.streamstack.metadata.raft;
 
-import io.streamstack.metadata.command.MetadataCommand;
+import io.streamstack.metadata.model.MetadataCommand;
 import io.streamstack.s3.operator.ObjectStorage;
 
 import org.slf4j.Logger;

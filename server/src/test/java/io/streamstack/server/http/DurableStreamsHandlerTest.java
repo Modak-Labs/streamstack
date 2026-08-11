@@ -1,11 +1,14 @@
 package io.streamstack.server.http;
 
 import io.javalin.Javalin;
-import io.streamstack.server.store.CreateResult;
-import io.streamstack.server.store.OffsetToken;
-import io.streamstack.server.store.ReadResult;
+import io.streamstack.model.Protocol;
+import io.streamstack.server.model.AppendCommand;
+import io.streamstack.server.model.AppendResult;
+import io.streamstack.server.model.CreateResult;
+import io.streamstack.server.model.OffsetToken;
+import io.streamstack.server.model.ReadResult;
+import io.streamstack.server.model.StreamInfo;
 import io.streamstack.server.store.StoreException;
-import io.streamstack.server.store.StreamInfo;
 import io.streamstack.server.store.StreamStore;
 import io.streamstack.server.store.StreamWaiterRegistry;
 
@@ -19,7 +22,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -122,45 +128,136 @@ public class DurableStreamsHandlerTest {
         }
     }
 
+    @Test
+    void producerAcceptReturns200AndDuplicateReturns204() throws Exception {
+        InMemoryStore store = new InMemoryStore();
+        DurableStreamsHandler handler = new DurableStreamsHandler(store, Duration.ofMillis(50), Duration.ofSeconds(1), 1024);
+        Javalin app = Javalin.create(cfg -> cfg.showJavalinBanner = false);
+        app.get("/*", handler::handle);
+        app.post("/*", handler::handle);
+        app.put("/*", handler::handle);
+        app.start(0);
+        try {
+            String base = "http://127.0.0.1:" + app.port() + "/streams/producer";
+            HttpClient client = HttpClient.newHttpClient();
+            client.send(HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
+                .PUT(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+
+            HttpResponse<String> first = client.send(
+                HttpRequest.newBuilder(URI.create(base))
+                    .header("Content-Type", "text/plain")
+                    .header(Protocol.H_PRODUCER_ID, "p1")
+                    .header(Protocol.H_PRODUCER_EPOCH, "0")
+                    .header(Protocol.H_PRODUCER_SEQ, "0")
+                    .POST(HttpRequest.BodyPublishers.ofString("a")).build(),
+                HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, first.statusCode());
+            assertEquals("0", first.headers().firstValue(Protocol.H_PRODUCER_SEQ).orElse(""));
+
+            HttpResponse<String> dup = client.send(
+                HttpRequest.newBuilder(URI.create(base))
+                    .header("Content-Type", "text/plain")
+                    .header(Protocol.H_PRODUCER_ID, "p1")
+                    .header(Protocol.H_PRODUCER_EPOCH, "0")
+                    .header(Protocol.H_PRODUCER_SEQ, "0")
+                    .POST(HttpRequest.BodyPublishers.ofString("a")).build(),
+                HttpResponse.BodyHandlers.ofString());
+            assertEquals(204, dup.statusCode());
+            assertEquals("0", dup.headers().firstValue(Protocol.H_PRODUCER_SEQ).orElse(""));
+        } finally {
+            app.stop();
+        }
+    }
+
     static final class InMemoryStore implements StreamStore {
         private final ConcurrentHashMap<String, Entry> streams = new ConcurrentHashMap<>();
         private final StreamWaiterRegistry waiters = new StreamWaiterRegistry();
         private final AtomicLong ids = new AtomicLong();
 
         @Override
-        public CreateResult create(URI url, String contentType, Long ttlSeconds, Instant expiresAt, InputStream initialBody)
-            throws StoreException {
+        public CreateResult create(
+            URI url,
+            String contentType,
+            Long ttlSeconds,
+            Instant expiresAt,
+            boolean closed,
+            InputStream initialBody) throws StoreException {
             String path = url.getPath();
             Entry existing = streams.get(path);
             if (existing != null) {
-                if (!existing.matches(contentType, ttlSeconds, expiresAt)) {
+                if (!existing.matches(contentType, ttlSeconds, expiresAt, closed)) {
                     throw new StoreException(StoreException.Kind.CONFLICT);
                 }
                 return new CreateResult(false, existing.info());
             }
-            Entry created = new Entry(path, ids.incrementAndGet(), contentType, ttlSeconds, expiresAt);
+            Entry created = new Entry(path, ids.incrementAndGet(), contentType, ttlSeconds, expiresAt, closed);
             streams.put(path, created);
             return new CreateResult(true, created.info());
         }
 
         @Override
-        public OffsetToken append(URI url, String contentType, InputStream body) throws StoreException {
+        public AppendResult append(URI url, AppendCommand request) throws StoreException {
             try {
                 Entry entry = require(url);
+                OffsetToken next = OffsetToken.ofRecordOffset(entry.nextOffset);
+                if (request.hasProducer()) {
+                    ProducerState state = entry.producers.get(request.producerId());
+                    long epoch = request.producerEpoch();
+                    long seq = request.producerSeq();
+                    if (state == null) {
+                        if (seq != 0L) {
+                            throw new StoreException(StoreException.Kind.BAD_REQUEST, next, false,
+                                "New epoch must start with sequence 0");
+                        }
+                    } else if (epoch < state.epoch) {
+                        throw StoreException.fenced(state.epoch);
+                    } else if (epoch > state.epoch) {
+                        if (seq != 0L) {
+                            throw new StoreException(StoreException.Kind.BAD_REQUEST, next, false,
+                                "New epoch must start with sequence 0");
+                        }
+                    } else if (seq <= state.lastSeq) {
+                        return new AppendResult(next, false, entry.closed, epoch, state.lastSeq);
+                    } else if (seq != state.lastSeq + 1) {
+                        throw StoreException.sequenceGap(state.lastSeq + 1, seq);
+                    }
+                }
                 if (entry.closed) {
-                    throw new StoreException(StoreException.Kind.CLOSED, OffsetToken.ofRecordOffset(entry.nextOffset), true);
+                    if (request.close() && request.body().length == 0) {
+                        return new AppendResult(next, false, true, request.producerEpoch(), request.producerSeq());
+                    }
+                    throw new StoreException(StoreException.Kind.CLOSED, next, true);
                 }
-                if (!entry.contentType.equals(contentType)) {
-                    throw new StoreException(StoreException.Kind.CONFLICT, OffsetToken.ofRecordOffset(entry.nextOffset), false);
+                boolean closeOnly = request.body().length == 0 && request.close();
+                if (!closeOnly) {
+                    if (request.contentType() == null || !entry.contentType.equals(request.contentType())) {
+                        throw new StoreException(StoreException.Kind.CONFLICT, next, false);
+                    }
+                    if (request.body().length == 0) {
+                        throw new StoreException(StoreException.Kind.BAD_REQUEST);
+                    }
+                    if (request.streamSeq() != null && entry.lastSeq != null
+                        && request.streamSeq().compareTo(entry.lastSeq) <= 0) {
+                        throw new StoreException(StoreException.Kind.CONFLICT, next, false, "Sequence conflict");
+                    }
+                    entry.chunks.put(entry.nextOffset, request.body());
+                    entry.nextOffset += 1;
+                    waiters.notifyAppend(entry.path, entry.nextOffset);
+                    next = OffsetToken.ofRecordOffset(entry.nextOffset);
+                    if (request.streamSeq() != null) {
+                        entry.lastSeq = request.streamSeq();
+                    }
                 }
-                byte[] bytes = body.readAllBytes();
-                if (bytes.length == 0) {
-                    throw new StoreException(StoreException.Kind.BAD_REQUEST);
+                if (request.hasProducer()) {
+                    entry.producers.put(request.producerId(),
+                        new ProducerState(request.producerEpoch(), request.producerSeq()));
                 }
-                entry.chunks.put(entry.nextOffset, bytes);
-                entry.nextOffset += 1;
-                waiters.notifyAppend(entry.path, entry.nextOffset);
-                return OffsetToken.ofRecordOffset(entry.nextOffset);
+                if (request.close()) {
+                    entry.closed = true;
+                    waiters.notifyClosed(entry.path);
+                }
+                return new AppendResult(next, !closeOnly, entry.closed,
+                    request.producerEpoch(), request.producerSeq());
             } catch (StoreException e) {
                 throw e;
             } catch (Exception e) {
@@ -170,14 +267,7 @@ public class DurableStreamsHandlerTest {
 
         @Override
         public OffsetToken close(URI url) throws StoreException {
-            Entry entry = require(url);
-            OffsetToken next = OffsetToken.ofRecordOffset(entry.nextOffset);
-            if (entry.closed) {
-                throw new StoreException(StoreException.Kind.CLOSED, next, true);
-            }
-            entry.closed = true;
-            waiters.notifyClosed(entry.path);
-            return next;
+            return append(url, new AppendCommand(null, new byte[0], null, null, null, null, true)).nextOffset();
         }
 
         @Override
@@ -203,13 +293,13 @@ public class DurableStreamsHandlerTest {
                 throw new StoreException(StoreException.Kind.BAD_REQUEST);
             }
             if (start == entry.nextOffset) {
-                return new ReadResult(new byte[0], entry.contentType, OffsetToken.ofRecordOffset(entry.nextOffset), true,
+                return new ReadResult(List.of(), entry.contentType, OffsetToken.ofRecordOffset(entry.nextOffset), true,
                     entry.closed);
             }
             byte[] body = entry.chunks.getOrDefault(start, new byte[0]);
             long next = start + 1;
-            return new ReadResult(body, entry.contentType, OffsetToken.ofRecordOffset(next), next >= entry.nextOffset,
-                entry.closed);
+            return new ReadResult(List.of(body), entry.contentType, OffsetToken.ofRecordOffset(next),
+                next >= entry.nextOffset, entry.closed);
         }
 
         @Override
@@ -235,6 +325,16 @@ public class DurableStreamsHandlerTest {
             return entry;
         }
 
+        static final class ProducerState {
+            final long epoch;
+            final long lastSeq;
+
+            ProducerState(long epoch, long lastSeq) {
+                this.epoch = epoch;
+                this.lastSeq = lastSeq;
+            }
+        }
+
         static final class Entry {
             final String path;
             final long streamId;
@@ -242,21 +342,25 @@ public class DurableStreamsHandlerTest {
             final Long ttlSeconds;
             final Instant expiresAt;
             final LinkedHashMap<Long, byte[]> chunks = new LinkedHashMap<>();
+            final Map<String, ProducerState> producers = new LinkedHashMap<>();
             long nextOffset;
             boolean closed;
+            String lastSeq;
 
-            Entry(String path, long streamId, String contentType, Long ttlSeconds, Instant expiresAt) {
+            Entry(String path, long streamId, String contentType, Long ttlSeconds, Instant expiresAt, boolean closed) {
                 this.path = path;
                 this.streamId = streamId;
                 this.contentType = Objects.requireNonNull(contentType);
                 this.ttlSeconds = ttlSeconds;
                 this.expiresAt = expiresAt;
+                this.closed = closed;
             }
 
-            boolean matches(String contentType, Long ttlSeconds, Instant expiresAt) {
+            boolean matches(String contentType, Long ttlSeconds, Instant expiresAt, boolean closed) {
                 return this.contentType.equals(contentType)
                     && Objects.equals(this.ttlSeconds, ttlSeconds)
-                    && Objects.equals(this.expiresAt, expiresAt);
+                    && Objects.equals(this.expiresAt, expiresAt)
+                    && this.closed == closed;
             }
 
             StreamInfo info() {

@@ -1,4 +1,4 @@
-package io.streamstack.server.store;
+package io.streamstack.server.model;
 
 public record CreateResult(boolean created, StreamInfo info) {
 }

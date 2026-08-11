@@ -1,6 +1,6 @@
 package io.streamstack.metadata.raft;
 
-import io.streamstack.metadata.command.MetadataCommand;
+import io.streamstack.metadata.model.MetadataCommand;
 import io.streamstack.s3.metadata.S3ObjectMetadata;
 import io.streamstack.s3.objects.CommitStreamSetObjectHook;
 import io.streamstack.s3.objects.CommitStreamSetObjectRequest;

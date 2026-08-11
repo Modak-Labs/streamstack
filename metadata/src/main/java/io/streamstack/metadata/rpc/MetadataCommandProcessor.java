@@ -2,10 +2,12 @@ package io.streamstack.metadata.rpc;
 
 import com.alipay.sofa.jraft.rpc.RpcContext;
 import com.alipay.sofa.jraft.rpc.RpcProcessor;
-
 import io.streamstack.metadata.MetadataException;
-import io.streamstack.metadata.command.MetadataCommand;
-import io.streamstack.metadata.command.MetadataCommandCodec;
+import io.streamstack.metadata.codec.MetadataCommandCodec;
+import io.streamstack.metadata.codec.MetadataResultCodec;
+import io.streamstack.metadata.model.MetadataCommand;
+import io.streamstack.metadata.model.MetadataCommandRequest;
+import io.streamstack.metadata.model.MetadataCommandResponse;
 import io.streamstack.metadata.raft.MetadataNode;
 
 import java.util.concurrent.CompletionException;
@@ -48,11 +50,11 @@ public final class MetadataCommandProcessor implements RpcProcessor<MetadataComm
         return MetadataCommandRequest.class.getName();
     }
 
-    private static Throwable unwrap(Throwable t) {
-        Throwable cur = t;
-        while (cur instanceof CompletionException && cur.getCause() != null) {
-            cur = cur.getCause();
+    private static Throwable unwrap(Throwable error) {
+        Throwable cause = error;
+        while (cause instanceof CompletionException && cause.getCause() != null) {
+            cause = cause.getCause();
         }
-        return cur;
+        return cause;
     }
 }

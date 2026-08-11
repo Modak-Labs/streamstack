@@ -1,4 +1,4 @@
-package io.streamstack.metadata.command;
+package io.streamstack.metadata.model;
 
 import io.streamstack.s3.objects.CommitStreamSetObjectRequest;
 import io.streamstack.s3.objects.CompactStreamObjectRequest;

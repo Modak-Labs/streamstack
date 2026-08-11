@@ -16,6 +16,10 @@
     <dependencies>
         <dependency>
             <groupId>io.streamstack</groupId>
+            <artifactId>model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.streamstack</groupId>
             <artifactId>stream</artifactId>
         </dependency>
         <dependency>

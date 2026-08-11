@@ -96,6 +96,7 @@ public final class StreamStackServer implements AutoCloseable {
         app.put("/*", router::handle);
         app.delete("/*", router::handle);
         app.head("/*", router::handle);
+        app.options("/*", router::handle);
     }
 
     public void start() throws Exception {

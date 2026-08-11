@@ -4,7 +4,7 @@ import io.streamstack.api.KVClient;
 import io.streamstack.api.KeyValue;
 import io.streamstack.api.KeyValue.Key;
 import io.streamstack.api.KeyValue.Value;
-import io.streamstack.metadata.command.MetadataCommand;
+import io.streamstack.metadata.model.MetadataCommand;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
