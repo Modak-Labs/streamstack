@@ -1,6 +1,7 @@
 package io.streamstack.server;
 
 import io.javalin.Javalin;
+import io.streamstack.Version;
 import io.streamstack.metadata.raft.MetadataNode;
 import io.streamstack.metadata.raft.RaftKVClient;
 import io.streamstack.metadata.raft.RaftObjectManager;
@@ -10,6 +11,7 @@ import io.streamstack.s3.S3Storage;
 import io.streamstack.s3.S3StreamClient;
 import io.streamstack.s3.cache.blockcache.DefaultObjectReaderFactory;
 import io.streamstack.s3.cache.blockcache.StreamReaders;
+import io.streamstack.s3.compact.CompactionManager;
 import io.streamstack.s3.failover.StorageFailureHandler;
 import io.streamstack.s3.operator.BucketURI;
 import io.streamstack.s3.operator.LocalFileObjectStorage;
@@ -39,6 +41,7 @@ public final class StreamStackServer implements AutoCloseable {
     private final ObjectStorage objectStorage;
     private final S3Storage storage;
     private final S3StreamClient streamClient;
+    private final CompactionManager compactionManager;
     private final S3StreamStore store;
     private final Javalin app;
     private final AtomicBoolean started = new AtomicBoolean(false);
@@ -66,7 +69,7 @@ public final class StreamStackServer implements AutoCloseable {
         Config streamConfig = new Config();
         streamConfig.nodeId(config.nodeId());
         streamConfig.nodeEpoch(config.nodeEpoch());
-        streamConfig.blockCacheSize(0);
+        streamConfig.version(() -> Version.LATEST);
 
         MemoryWriteAheadLog wal = new MemoryWriteAheadLog();
         this.storage = new S3Storage(
@@ -81,6 +84,7 @@ public final class StreamStackServer implements AutoCloseable {
                 throw new RuntimeException(ex);
             });
         this.streamClient = new S3StreamClient(streamManager, storage, objectManager, objectStorage, streamConfig);
+        this.compactionManager = new CompactionManager(streamConfig, objectManager, streamManager, objectStorage);
         RaftKVClient kvClient = new RaftKVClient(metadataNode);
         this.store = new S3StreamStore(streamClient, kvClient, metadataNode, new StreamWaiterRegistry());
         DurableStreamsHandler handler = new DurableStreamsHandler(
@@ -106,6 +110,7 @@ public final class StreamStackServer implements AutoCloseable {
         metadataNode.awaitLeader(30, TimeUnit.SECONDS);
         metadataNode.awaitRegistered(30, TimeUnit.SECONDS);
         storage.startup();
+        compactionManager.start();
         app.start(config.httpHost(), config.httpPort());
         LOGGER.info("streamstack server started nodeId={} http={}:{} raft={}:{}",
             config.nodeId(), config.httpHost(), config.httpPort(), config.raftHost(), config.raftPort());
@@ -137,6 +142,10 @@ public final class StreamStackServer implements AutoCloseable {
                 }
             }
             store.shutdown();
+        } catch (Exception ignored) {
+        }
+        try {
+            compactionManager.shutdown();
         } catch (Exception ignored) {
         }
         try {
