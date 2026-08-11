@@ -1,0 +1,647 @@
+/*
+ * Copyright 2025, AutoMQ HK Limited.
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package io.streamstack.s3;
+
+import io.streamstack.DefaultAppendResult;
+import io.streamstack.RecordBatchWithContextWrapper;
+import io.streamstack.RecyclingByteBufSeqAlloc;
+import io.streamstack.api.AppendResult;
+import io.streamstack.api.FetchResult;
+import io.streamstack.api.OpenStreamOptions;
+import io.streamstack.api.RecordBatch;
+import io.streamstack.api.RecordBatchWithContext;
+import io.streamstack.api.Stream;
+import io.streamstack.api.exceptions.ErrorCode;
+import io.streamstack.api.exceptions.FastReadFailFastException;
+import io.streamstack.api.exceptions.StreamClientException;
+import io.streamstack.s3.cache.CacheAccessType;
+import io.streamstack.s3.context.AppendContext;
+import io.streamstack.s3.context.FetchContext;
+import io.streamstack.s3.metadata.StreamMetadata;
+import io.streamstack.s3.metrics.Metrics;
+import io.streamstack.s3.metrics.MetricsLevel;
+import io.streamstack.s3.metrics.S3StreamMetricsConstant;
+import io.streamstack.s3.metrics.TimerUtil;
+import io.streamstack.s3.metrics.operations.S3Operation;
+import io.streamstack.s3.metrics.stats.NetworkStats;
+import io.streamstack.s3.metrics.stats.OperationLatencyMetrics;
+import io.streamstack.s3.metrics.wrapper.DeltaHistogram;
+import io.streamstack.s3.model.StreamRecordBatch;
+import io.streamstack.s3.streams.StreamManager;
+import io.streamstack.s3.streams.StreamMetadataListener;
+import io.streamstack.utils.FutureUtil;
+import io.streamstack.utils.GlobalSwitch;
+import io.streamstack.utils.LogContext;
+import io.streamstack.utils.PendingRequestTracker;
+
+import org.slf4j.Logger;
+
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import io.netty.buffer.Unpooled;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.instrumentation.annotations.SpanAttribute;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
+
+import static io.streamstack.s3.ByteBufAlloc.ENCODE_RECORD;
+import static io.streamstack.utils.FutureUtil.exec;
+import static io.streamstack.utils.FutureUtil.propagate;
+
+public class S3Stream implements Stream, StreamMetadataListener {
+    private static final PendingRequestTracker PENDING_APPEND_TRACKER = new PendingRequestTracker();
+    private static final PendingRequestTracker PENDING_FETCH_TRACKER = new PendingRequestTracker();
+    // Shared for the process lifetime so streams reuse the same bounded set of active slabs.
+    private static final RecyclingByteBufSeqAlloc RECORD_ALLOC = new RecyclingByteBufSeqAlloc(ENCODE_RECORD);
+    private static final Metrics.LongGaugeBundle.LongGauge PENDING_STREAM_APPEND_LATENCY = Metrics.instance()
+        .longGauge("kafka_stream_pending_stream_append_latency",
+            "The maximum latency of pending stream append requests that exceed the pending latency threshold. "
+                + "NOTE: the minimum measurable latency depends on the reporting interval of this metrics.",
+            "nanoseconds")
+        .register(MetricsLevel.INFO, Attributes.empty());
+    private static final Metrics.LongGaugeBundle.LongGauge PENDING_STREAM_FETCH_LATENCY = Metrics.instance()
+        .longGauge("kafka_stream_pending_stream_fetch_latency",
+            "The maximum latency of pending stream fetch requests that exceed the pending latency threshold. "
+                + "NOTE: the minimum measurable latency depends on the reporting interval of this metrics.",
+            "nanoseconds")
+        .register(MetricsLevel.INFO, Attributes.empty());
+    private static final DeltaHistogram APPEND_STREAM_LATENCY =
+        OperationLatencyMetrics.operation(MetricsLevel.INFO, S3Operation.APPEND_STREAM);
+    private static final DeltaHistogram FETCH_STREAM_LATENCY =
+        OperationLatencyMetrics.operation(MetricsLevel.INFO, S3Operation.FETCH_STREAM);
+    private static final DeltaHistogram TRIM_STREAM_LATENCY =
+        OperationLatencyMetrics.operation(MetricsLevel.INFO, S3Operation.TRIM_STREAM);
+    private static final DeltaHistogram CLOSE_STREAM_SUCCESS_LATENCY = OperationLatencyMetrics
+        .operation(MetricsLevel.INFO, S3Operation.CLOSE_STREAM, S3StreamMetricsConstant.LABEL_STATUS_SUCCESS);
+    private static final DeltaHistogram CLOSE_STREAM_FAIL_LATENCY = OperationLatencyMetrics
+        .operation(MetricsLevel.INFO, S3Operation.CLOSE_STREAM, S3StreamMetricsConstant.LABEL_STATUS_FAILED);
+
+    static {
+        PENDING_STREAM_APPEND_LATENCY.record(PENDING_APPEND_TRACKER::pendingLatencyNanos);
+        PENDING_STREAM_FETCH_LATENCY.record(PENDING_FETCH_TRACKER::pendingLatencyNanos);
+    }
+
+    private final Logger logger;
+    final AtomicLong confirmOffset;
+    private final String logIdent;
+    private final long streamId;
+    private final long epoch;
+    private final AtomicLong nextOffset;
+    private final Storage storage;
+    private final StreamManager streamManager;
+    private final Status status;
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final ReentrantReadWriteLock.WriteLock writeLock = lock.writeLock();
+    private final ReentrantReadWriteLock.ReadLock readLock = lock.readLock();
+    private final ReentrantLock appendLock = new ReentrantLock();
+    private final Set<CompletableFuture<?>> pendingAppends = ConcurrentHashMap.newKeySet();
+    private volatile CompletableFuture<AppendResult> lastAppendFuture;
+    private final Set<CompletableFuture<?>> pendingFetches = ConcurrentHashMap.newKeySet();
+    private final OpenStreamOptions options;
+    private long startOffset;
+    private CompletableFuture<Void> lastPendingTrim = CompletableFuture.completedFuture(null);
+    private CompletableFuture<Void> closeCf;
+    private StreamMetadataListener.Handle listenerHandle;
+
+    private S3Stream(long streamId, long epoch, long startOffset, long nextOffset, Storage storage,
+        StreamManager streamManager, OpenStreamOptions options) {
+        this.streamId = streamId;
+        this.epoch = epoch;
+        this.startOffset = startOffset;
+        this.logIdent = "[streamId=" + streamId + " epoch=" + epoch + "] ";
+        this.logger = new LogContext(logIdent).logger(S3Stream.class);
+        this.nextOffset = new AtomicLong(nextOffset);
+        this.confirmOffset = new AtomicLong(nextOffset);
+        this.status = new Status();
+        this.storage = storage;
+        this.streamManager = streamManager;
+        this.options = options;
+    }
+
+    public static S3Stream create(long streamId, long epoch, long startOffset, long nextOffset, Storage storage,
+        StreamManager streamManager) {
+        return create(streamId, epoch, startOffset, nextOffset, storage, streamManager, OpenStreamOptions.DEFAULT);
+    }
+
+    public static S3Stream create(long streamId, long epoch, long startOffset, long nextOffset, Storage storage,
+        StreamManager streamManager, OpenStreamOptions options) {
+        S3Stream s3Stream = new S3Stream(streamId, epoch, startOffset, nextOffset, storage, streamManager, options);
+        s3Stream.completeInitialization();
+        return s3Stream;
+    }
+
+    public static long maxPendingStreamAppendLatency() {
+        return PENDING_APPEND_TRACKER.pendingLatencyNanos();
+    }
+
+    public static long maxPendingStreamFetchLatency() {
+        return PENDING_FETCH_TRACKER.pendingLatencyNanos();
+    }
+
+    public static long appendStreamLatencySum() {
+        return APPEND_STREAM_LATENCY.sum();
+    }
+
+    public static long appendStreamLatencyCount() {
+        return APPEND_STREAM_LATENCY.count();
+    }
+
+    private void completeInitialization() {
+        if (snapshotRead()) {
+            listenerHandle = streamManager.addMetadataListener(streamId, this);
+        }
+        NetworkStats.getInstance().createStreamReadBytesStats(streamId);
+    }
+
+    public boolean isClosed() {
+        return status.isClosed();
+    }
+
+    @Override
+    public long streamId() {
+        return this.streamId;
+    }
+
+    @Override
+    public long streamEpoch() {
+        return this.epoch;
+    }
+
+    @Override
+    public long startOffset() {
+        return this.startOffset;
+    }
+
+    @Override
+    public long confirmOffset() {
+        return this.confirmOffset.get();
+    }
+
+    @Override
+    public void confirmOffset(long offset) {
+        if (!snapshotRead()) {
+            throw new UnsupportedOperationException("Only snapshot-read mode support set confirmOffset");
+        }
+        updateSnapshotReadConfirmOffset(offset);
+    }
+
+    @Override
+    public long nextOffset() {
+        return nextOffset.get();
+    }
+
+    @Override
+    @WithSpan
+    public CompletableFuture<AppendResult> append(AppendContext context, RecordBatch recordBatch) {
+        if (snapshotRead()) {
+            return FutureUtil.failedFuture(new IllegalStateException("Append operation is not support for readonly stream"));
+        }
+        if (recordBatch.count() < 0) {
+            return FutureUtil.failedFuture(new IllegalArgumentException("record batch count is negative"));
+        }
+        long startTimeNanos = System.nanoTime();
+        readLock.lock();
+        try {
+            CompletableFuture<AppendResult> cf = exec(() -> {
+                appendLock.lock();
+                try {
+                    this.lastAppendFuture = append0(context, recordBatch);
+                    return lastAppendFuture;
+                } finally {
+                    appendLock.unlock();
+                }
+            }, logger, "append");
+            pendingAppends.add(cf);
+            PendingRequestTracker.Handle pendingAppend = PENDING_APPEND_TRACKER.begin();
+            return cf.whenComplete((nil, ex) -> {
+                APPEND_STREAM_LATENCY.record(TimerUtil.timeElapsedSince(startTimeNanos, TimeUnit.NANOSECONDS));
+                pendingAppends.remove(cf);
+                pendingAppend.close();
+            });
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    @WithSpan
+    private CompletableFuture<AppendResult> append0(AppendContext context, RecordBatch recordBatch) {
+        if (!status.isWritable()) {
+            return FutureUtil.failedFuture(new StreamClientException(ErrorCode.STREAM_ALREADY_CLOSED, logIdent + "stream is not writable"));
+        }
+        long offset = nextOffset.getAndAdd(recordBatch.count());
+        StreamRecordBatch streamRecordBatch = StreamRecordBatch.of(streamId, epoch, offset, recordBatch.count(),
+            Unpooled.wrappedBuffer(recordBatch.rawPayload()), RECORD_ALLOC);
+        CompletableFuture<AppendResult> cf = storage.append(context, streamRecordBatch).thenApply(nil -> {
+            updateConfirmOffset(offset + recordBatch.count());
+            return new DefaultAppendResult(offset);
+        });
+        return cf.whenComplete((rst, ex) -> {
+            if (ex == null) {
+                return;
+            }
+            // Wal should keep retry append until stream is fenced or wal is closed.
+            status.markFenced();
+            Throwable cause = FutureUtil.cause(ex);
+            if (cause instanceof StreamClientException && ((StreamClientException) cause).getCode() == ErrorCode.EXPIRED_STREAM_EPOCH) {
+                logger.info("stream append, stream is fenced");
+            } else {
+                logger.warn("stream append fail",  cause);
+            }
+        });
+    }
+
+    @SuppressWarnings({"checkstyle:npathcomplexity"})
+    @Override
+    @WithSpan
+    public CompletableFuture<FetchResult> fetch(FetchContext context,
+        @SpanAttribute long startOffset,
+        @SpanAttribute long endOffset,
+        @SpanAttribute int maxBytes) {
+        if (snapshotRead()) {
+            context.readOptions().snapshotRead(true);
+        }
+        TimerUtil timerUtil = new TimerUtil();
+        readLock.lock();
+        try {
+            CompletableFuture<FetchResult> cf = exec(() -> fetch0(context, startOffset, endOffset, maxBytes), logger, "fetch");
+            CompletableFuture<FetchResult> retCf = cf.thenApply(rs -> {
+                // TODO: move the fast / slow read metrics to kafka module.
+                long totalSize = 0L;
+                for (RecordBatch recordBatch : rs.recordBatchList()) {
+                    totalSize += recordBatch.rawPayload().remaining();
+                }
+                final long finalSize = totalSize;
+                if (context.readOptions().fastRead()) {
+                    NetworkStats.getInstance().fastReadBytesStats(streamId).ifPresent(counter -> counter.inc(finalSize));
+                } else {
+                    NetworkStats.getInstance().slowReadBytesStats(streamId).ifPresent(counter -> counter.inc(finalSize));
+                }
+                return rs;
+            });
+            pendingFetches.add(retCf);
+            PendingRequestTracker.Handle pendingFetch = PENDING_FETCH_TRACKER.begin();
+            retCf.whenComplete((rs, ex) -> {
+                if (ex != null) {
+                    Throwable cause = FutureUtil.cause(ex);
+                    if (!(cause instanceof FastReadFailFastException)) {
+                        logger.error("stream fetch [{}, {}) {} fail", startOffset, endOffset, maxBytes, ex);
+                    }
+                }
+                FETCH_STREAM_LATENCY.record(timerUtil.elapsedAs(TimeUnit.NANOSECONDS));
+                if (logger.isDebugEnabled()) {
+                    long totalSize = 0L;
+                    for (RecordBatch recordBatch : rs.recordBatchList()) {
+                        totalSize += recordBatch.rawPayload().remaining();
+                    }
+                    logger.debug("fetch data, stream={}, {}-{}, total bytes: {}, cost={}ms", streamId,
+                        startOffset, endOffset, totalSize, timerUtil.elapsedAs(TimeUnit.MILLISECONDS));
+                }
+                pendingFetches.remove(retCf);
+                pendingFetch.close();
+            });
+            return retCf;
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    @WithSpan
+    private CompletableFuture<FetchResult> fetch0(FetchContext context, long startOffset, long endOffset,
+        int maxBytes) {
+        if (!status.isReadable()) {
+            return FutureUtil.failedFuture(new StreamClientException(ErrorCode.STREAM_ALREADY_CLOSED, logIdent + "stream is already closed"));
+        }
+        if (logger.isTraceEnabled()) {
+            logger.trace("stream try fetch, startOffset: {}, endOffset: {}, maxBytes: {}", startOffset, endOffset, maxBytes);
+        }
+        long confirmOffset = confirmOffset();
+        if (startOffset < startOffset() || endOffset > confirmOffset) {
+            return FutureUtil.failedFuture(
+                new StreamClientException(
+                    ErrorCode.OFFSET_OUT_OF_RANGE_BOUNDS,
+                    String.format("fetch range[%s, %s) is out of stream bound [%s, %s)", startOffset, endOffset, startOffset(), confirmOffset)
+                ));
+        }
+        if (startOffset > endOffset) {
+            return FutureUtil.failedFuture(new IllegalArgumentException(String.format("fetch startOffset %s is greater than endOffset %s", startOffset, endOffset)));
+        }
+        if (startOffset == endOffset) {
+            return CompletableFuture.completedFuture(new DefaultFetchResult(Collections.emptyList(), CacheAccessType.DELTA_WAL_CACHE_HIT, false));
+        }
+        return storage.read(context, streamId, startOffset, endOffset, maxBytes).thenApply(dataBlock -> {
+            List<StreamRecordBatch> records = dataBlock.getRecords();
+            if (logger.isTraceEnabled()) {
+                logger.trace("stream fetch, startOffset: {}, endOffset: {}, maxBytes: {}, records: {}", startOffset, endOffset, maxBytes, records.size());
+            }
+            return new DefaultFetchResult(records, dataBlock.getCacheAccessType(), context.readOptions().pooledBuf());
+        });
+    }
+
+    @Override
+    public CompletableFuture<Void> trim(long newStartOffset) {
+        if (snapshotRead()) {
+            return FutureUtil.failedFuture(new IllegalStateException("Trim operation is not support for readonly stream"));
+        }
+        writeLock.lock();
+        try {
+            TimerUtil timerUtil = new TimerUtil();
+            return exec(() -> {
+                CompletableFuture<Void> cf = new CompletableFuture<>();
+                lastPendingTrim.whenComplete((nil, ex) -> propagate(trim0(newStartOffset), cf));
+                this.lastPendingTrim = cf;
+                cf.whenComplete((nil, ex) -> TRIM_STREAM_LATENCY.record(timerUtil.elapsedAs(TimeUnit.NANOSECONDS)));
+                return cf;
+            }, logger, "trim");
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    private CompletableFuture<Void> trim0(long newStartOffset) {
+        if (newStartOffset < this.startOffset) {
+            logger.warn("trim newStartOffset[{}] less than current start offset[{}]",  newStartOffset, startOffset);
+            return CompletableFuture.completedFuture(null);
+        }
+        this.startOffset = newStartOffset;
+        CompletableFuture<Void> trimCf = new CompletableFuture<>();
+        // await all pending fetches complete to avoid trim offset intersect with fetches.
+        CompletableFuture<Void> awaitPendingFetchesCf = CompletableFuture.allOf(pendingFetches.toArray(new CompletableFuture[0]));
+        awaitPendingFetchesCf.whenComplete((nil, ex) -> propagate(streamManager.trimStream(streamId, epoch, newStartOffset), trimCf));
+        trimCf.whenComplete((nil, ex) -> {
+            if (ex != null) {
+                logger.error("trim fail", ex);
+            } else {
+                if (logger.isDebugEnabled()) {
+                    logger.debug("trim to {}",  newStartOffset);
+                }
+            }
+        });
+        return trimCf;
+    }
+
+    @Override
+    public CompletableFuture<Void> close() {
+        return close(false);
+    }
+
+    public CompletableFuture<Void> close(boolean force) {
+        if (snapshotRead()) {
+            listenerHandle.close();
+            NetworkStats.getInstance().removeStreamReadBytesStats(streamId);
+            return CompletableFuture.completedFuture(null);
+        }
+        TimerUtil timerUtil = new TimerUtil();
+        writeLock.lock();
+        try {
+            status.markClosed();
+
+            // await all pending append/fetch/trim request
+            List<CompletableFuture<?>> pendingRequests = new ArrayList<>(pendingAppends);
+            // add timeout to prevent the fetch(catch-up read) network throttle to block Stream#close.
+            if (GlobalSwitch.STRICT) {
+                pendingRequests.addAll(FutureUtil.timeoutAndSilence(pendingFetches.stream(), 10, TimeUnit.SECONDS));
+            }
+            pendingRequests.add(FutureUtil.timeoutAndSilence(lastPendingTrim, 10, TimeUnit.SECONDS));
+            if (force) {
+                pendingRequests.forEach(cf -> cf.completeExceptionally(new StreamClientException(ErrorCode.UNEXPECTED, "FORCE_CLOSE")));
+            }
+            // Supported repeated call #close.
+            // And it supports the following scenario:
+            // 1. #close(false): try gracefully close the stream. (await the pending request complete, upload data to object storage and close stream)
+            // 2. #close(true): try force close the stream. (complete the pending request with exception, upload data to object storage and close stream)
+            // Even #close(false) is called, we still could use #close(true) to force close the stream.
+            if (closeCf != null) {
+                return closeCf;
+            }
+
+            CompletableFuture<Void> awaitPendingRequestsCf = CompletableFuture.allOf(pendingRequests.toArray(new CompletableFuture[0]));
+            CompletableFuture<Void> closeCf = new CompletableFuture<>();
+
+            awaitPendingRequestsCf.whenComplete((nil, ex) -> propagate(exec(this::close0, logger, "close"), closeCf));
+
+            closeCf.whenComplete((nil, ex) -> {
+                if (ex != null) {
+                    logger.error("close fail", ex);
+                    CLOSE_STREAM_FAIL_LATENCY.record(timerUtil.elapsedAs(TimeUnit.NANOSECONDS));
+                } else {
+                    logger.info("closed");
+                    CLOSE_STREAM_SUCCESS_LATENCY.record(timerUtil.elapsedAs(TimeUnit.NANOSECONDS));
+                }
+                NetworkStats.getInstance().removeStreamReadBytesStats(streamId);
+            });
+
+            this.closeCf = closeCf;
+            return closeCf;
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    private CompletableFuture<Void> close0() {
+        return storage.forceUpload(streamId)
+            .thenCompose(nil -> streamManager.closeStream(streamId, epoch));
+    }
+
+    @Override
+    public CompletableFuture<Void> destroy() {
+        if (snapshotRead()) {
+            return FutureUtil.failedFuture(new IllegalStateException("Destroy operation is not support for readonly stream"));
+        }
+        writeLock.lock();
+        try {
+            CompletableFuture<Void> destroyCf = close().thenCompose(nil -> exec(this::destroy0, logger, "destroy"));
+            destroyCf.whenComplete((nil, ex) -> {
+                if (ex != null) {
+                    logger.error("destroy fail",  ex);
+                } else {
+                    logger.info("destroyed");
+                }
+            });
+            return destroyCf;
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    @Override
+    public CompletableFuture<AppendResult> lastAppendFuture() {
+        return lastAppendFuture;
+    }
+
+    public boolean snapshotRead() {
+        return options.readWriteMode() == OpenStreamOptions.ReadWriteMode.SNAPSHOT_READ;
+    }
+
+    private CompletableFuture<Void> destroy0() {
+        status.markDestroy();
+        startOffset = this.confirmOffset.get();
+        return streamManager.deleteStream(streamId, epoch);
+    }
+
+    private void updateConfirmOffset(long newOffset) {
+        for (; ; ) {
+            long oldConfirmOffset = confirmOffset.get();
+            if (oldConfirmOffset >= newOffset) {
+                break;
+            }
+            if (confirmOffset.compareAndSet(oldConfirmOffset, newOffset)) {
+                if (logger.isTraceEnabled()) {
+                    logger.trace("stream update confirm offset from {} to {}",  oldConfirmOffset, newOffset);
+                }
+                break;
+            }
+        }
+    }
+
+    @Override
+    public void onNewStreamMetadata(StreamMetadata metadata) {
+        updateSnapshotReadConfirmOffset(metadata.endOffset());
+        this.startOffset = metadata.startOffset();
+    }
+
+    private void updateSnapshotReadConfirmOffset(long newOffset) {
+        synchronized (this.confirmOffset) {
+            this.confirmOffset.updateAndGet(operand -> Math.max(newOffset, operand));
+            this.nextOffset.set(this.confirmOffset.get());
+        }
+    }
+
+    static class DefaultFetchResult implements FetchResult {
+        private static final LongAdder INFLIGHT = new LongAdder();
+        private final List<StreamRecordBatch> pooledRecords;
+        private final List<RecordBatchWithContext> records;
+        private final CacheAccessType cacheAccessType;
+        private final boolean pooledBuf;
+        private volatile boolean freed = false;
+
+        public DefaultFetchResult(List<StreamRecordBatch> streamRecords, CacheAccessType cacheAccessType,
+            boolean pooledBuf) {
+            this.pooledRecords = streamRecords;
+            this.pooledBuf = pooledBuf;
+            this.records = new ArrayList<>(streamRecords.size());
+            for (StreamRecordBatch streamRecordBatch : streamRecords) {
+                RecordBatch recordBatch = convert(streamRecordBatch, pooledBuf);
+                records.add(new RecordBatchWithContextWrapper(recordBatch, streamRecordBatch.getBaseOffset()));
+            }
+            this.cacheAccessType = cacheAccessType;
+            if (!pooledBuf) {
+                streamRecords.forEach(StreamRecordBatch::release);
+            } else {
+                INFLIGHT.increment();
+            }
+        }
+
+        private static RecordBatch convert(StreamRecordBatch streamRecordBatch, boolean pooledBuf) {
+            ByteBuffer buf;
+            // We shouldn't access the StreamRecordBatch after release it.
+            int count = streamRecordBatch.getCount();
+            if (pooledBuf) {
+                buf = streamRecordBatch.getPayload().nioBuffer();
+            } else {
+                buf = ByteBuffer.allocate(streamRecordBatch.size());
+                streamRecordBatch.getPayload().duplicate().readBytes(buf);
+                buf.flip();
+            }
+            return new RecordBatch() {
+                @Override
+                public int count() {
+                    return count;
+                }
+
+                @Override
+                public long baseTimestamp() {
+                    return 0;
+                }
+
+                @Override
+                public Map<String, String> properties() {
+                    return Collections.emptyMap();
+                }
+
+                @Override
+                public ByteBuffer rawPayload() {
+                    return buf;
+                }
+            };
+        }
+
+        @Override
+        public List<RecordBatchWithContext> recordBatchList() {
+            return records;
+        }
+
+        @Override
+        public CacheAccessType getCacheAccessType() {
+            return cacheAccessType;
+        }
+
+        @Override
+        public void free() {
+            if (!freed && pooledBuf) {
+                pooledRecords.forEach(StreamRecordBatch::release);
+                INFLIGHT.decrement();
+            }
+            freed = true;
+        }
+    }
+
+    static class Status {
+        private static final int CLOSED_MARK = 1;
+        private static final int FENCED_MARK = 1 << 1;
+        private static final int DESTROY_MARK = 1 << 2;
+        private final AtomicInteger status = new AtomicInteger();
+
+        public void markFenced() {
+            status.getAndUpdate(operand -> operand | FENCED_MARK);
+        }
+
+        public void markClosed() {
+            status.getAndUpdate(operand -> operand | CLOSED_MARK);
+        }
+
+        public void markDestroy() {
+            status.getAndUpdate(operand -> operand | DESTROY_MARK);
+        }
+
+        public boolean isClosed() {
+            return (status.get() & CLOSED_MARK) != 0;
+        }
+
+        public boolean isWritable() {
+            return status.get() == 0;
+        }
+
+        public boolean isReadable() {
+            return status.get() == 0;
+        }
+    }
+}

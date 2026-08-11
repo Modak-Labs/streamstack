@@ -1,0 +1,9 @@
+streamstack NOTICE
+
+This product includes software from AutoMQ s3stream (Apache License 2.0).
+Upstream: https://github.com/AutoMQ/automq
+Vendored commit: 82590ee67be83c7c60a57ea467c204ab15a79956
+Package renamed: com.automq.stream → io.streamstack
+
+--- AutoMQ NOTICE (excerpt) ---
+Copyright 2023-2025, AutoMQ HK Limited.
