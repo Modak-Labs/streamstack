@@ -36,9 +36,9 @@ public final class ProtocolConverter {
     }
 
     public static AppendCommand toAppendCommand(String name, AppendRequest request) {
-        Long streamSeq = null;
-        if (request.streamSeq() != null && !request.streamSeq().isEmpty()) {
-            streamSeq = OffsetToken.parse(request.streamSeq()).recordOffset();
+        String streamSeq = request.streamSeq();
+        if (streamSeq != null && streamSeq.isEmpty()) {
+            streamSeq = null;
         }
         Producer producer = null;
         if (request.producerId() != null) {

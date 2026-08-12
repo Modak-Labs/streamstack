@@ -7,15 +7,15 @@ public record AppendCommand(
     String name,
     List<byte[]> payloads,
     String contentType,
-    Long streamSeq,
+    String streamSeq,
     Producer producer,
     boolean closeAfter) {
 
     public AppendCommand {
         Objects.requireNonNull(name, "name");
         payloads = payloads == null ? List.of() : List.copyOf(payloads);
-        if (streamSeq != null && streamSeq < 0) {
-            throw new IllegalArgumentException("streamSeq must be >= 0");
+        if (streamSeq != null && streamSeq.isEmpty()) {
+            streamSeq = null;
         }
     }
 

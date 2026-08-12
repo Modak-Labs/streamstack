@@ -31,7 +31,7 @@ free_ports
 
 mkdir -p "${DATA}/data" "${DATA}/objects"
 cd "${STACK_ROOT}"
-mvn -pl durable-streams/server -am -q -DskipTests package
+mvn -pl durable-streams/server -am -q -DskipTests install
 mvn -pl durable-streams/server -q org.codehaus.mojo:exec-maven-plugin:3.5.0:java \
   -Dexec.args="--node-id 1 --node-epoch 1 --http-host 127.0.0.1 --http-port ${HTTP_PORT} --raft-host 127.0.0.1 --raft-port ${RAFT_PORT} --data-dir ${DATA}/data --object-dir ${DATA}/objects --routing LOCAL_ALWAYS" \
   >"${DATA}/server.log" 2>&1 &

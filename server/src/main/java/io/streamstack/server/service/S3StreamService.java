@@ -227,7 +227,10 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
                 if (command.streamSeq() != null
                     && (producer == null || producer.status() == ProducerDecision.Status.ACCEPTED)) {
-                    checkStreamSeq(entry, command.streamSeq(), next);
+                    if (entry.lastSeq() != null && command.streamSeq().compareTo(entry.lastSeq()) <= 0) {
+                        throw new StreamServiceException(
+                            StreamServiceException.Kind.CONFLICT, next, false, "Sequence conflict");
+                    }
                 }
 
                 if (!closeOnly) {
@@ -239,7 +242,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
                 RegistryEntry updated = entry;
                 if (command.streamSeq() != null) {
-                    updated = updated.withLastSeq(OffsetToken.ofRecordOffset(command.streamSeq()).value());
+                    updated = updated.withLastSeq(command.streamSeq());
                 }
                 if (producer != null && producer.status() == ProducerDecision.Status.ACCEPTED) {
                     Producer ctx = command.producer();
@@ -440,31 +443,6 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             && closedBy.producerId().equals(command.producer().producerId())
             && closedBy.epoch() == command.producer().epoch()
             && closedBy.seq() == command.producer().seq();
-    }
-
-    private static void checkStreamSeq(
-        RegistryEntry entry,
-        long expectedRecordOffset,
-        OffsetToken next) throws StreamServiceException {
-        if (entry.lastSeq() == null) {
-            return;
-        }
-        long last;
-        try {
-            last = OffsetToken.parse(entry.lastSeq()).recordOffset();
-        } catch (IllegalArgumentException e) {
-            // Legacy opaque string seq: fall back to lexicographic compare on padded value.
-            String expected = OffsetToken.ofRecordOffset(expectedRecordOffset).value();
-            if (expected.compareTo(entry.lastSeq()) <= 0) {
-                throw new StreamServiceException(
-                    StreamServiceException.Kind.CONFLICT, next, false, "Sequence conflict");
-            }
-            return;
-        }
-        if (expectedRecordOffset <= last) {
-            throw new StreamServiceException(
-                StreamServiceException.Kind.CONFLICT, next, false, "Sequence conflict");
-        }
     }
 
     private OffsetToken appendBytes(String name, Stream stream, byte[] bytes) throws Exception {

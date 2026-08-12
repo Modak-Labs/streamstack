@@ -271,7 +271,7 @@ public class DurableStreamsHandlerTest {
                     throw new StreamServiceException(StreamServiceException.Kind.BAD_REQUEST);
                 }
                 if (command.streamSeq() != null && entry.lastSeq != null
-                    && command.streamSeq() <= entry.lastSeq) {
+                    && command.streamSeq().compareTo(entry.lastSeq) <= 0) {
                     throw new StreamServiceException(
                         StreamServiceException.Kind.CONFLICT, next, false, "Sequence conflict");
                 }
@@ -383,7 +383,7 @@ public class DurableStreamsHandlerTest {
             final Map<String, ProducerState> producers = new LinkedHashMap<>();
             long nextOffset;
             boolean closed;
-            Long lastSeq;
+            String lastSeq;
 
             Entry(String name, long streamId, String contentType, Long ttlSeconds, Instant expiresAt, boolean closed) {
                 this.name = name;
