@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class StreamControlManagerTest {
+
     private static final int NODE_1 = 1;
     private static final int NODE_2 = 2;
     private static final long EPOCH_1 = 10L;
@@ -41,7 +42,6 @@ public class StreamControlManagerTest {
     void writesRequireRegisteredNodeEpoch() {
         MetadataException e = assertThrows(MetadataException.class, () -> streams.createStream(3, 1L));
         assertEquals(MetadataException.NODE_EPOCH_MISMATCH, e.code());
-
         e = assertThrows(MetadataException.class, () -> streams.createStream(NODE_1, EPOCH_1 + 1));
         assertEquals(MetadataException.NODE_EPOCH_MISMATCH, e.code());
     }
@@ -51,7 +51,6 @@ public class StreamControlManagerTest {
         streams.registerNode(NODE_1, EPOCH_1 + 5);
         MetadataException e = assertThrows(MetadataException.class, () -> streams.createStream(NODE_1, EPOCH_1));
         assertEquals(MetadataException.NODE_EPOCH_MISMATCH, e.code());
-
         e = assertThrows(MetadataException.class, () -> streams.registerNode(NODE_1, EPOCH_1));
         assertEquals(MetadataException.NODE_EPOCH_MISMATCH, e.code());
     }
@@ -61,22 +60,17 @@ public class StreamControlManagerTest {
         long streamId = streams.createStream(NODE_1, EPOCH_1);
         StreamMetadata opened = streams.openStream(NODE_1, EPOCH_1, streamId, 1);
         assertEquals(StreamState.OPENED, opened.state());
-
         StreamMetadata retried = streams.openStream(NODE_1, EPOCH_1, streamId, 1);
         assertEquals(StreamState.OPENED, retried.state());
-
         MetadataException e = assertThrows(MetadataException.class,
             () -> streams.openStream(NODE_2, EPOCH_2, streamId, 1));
         assertEquals(MetadataException.STREAM_FENCED, e.code());
-
         e = assertThrows(MetadataException.class,
             () -> streams.openStream(NODE_2, EPOCH_2, streamId, 0));
         assertEquals(MetadataException.STREAM_FENCED, e.code());
-
         e = assertThrows(MetadataException.class,
             () -> streams.openStream(NODE_2, EPOCH_2, streamId, 2));
         assertEquals(MetadataException.STREAM_NOT_CLOSED, e.code());
-
         streams.closeStream(NODE_1, EPOCH_1, streamId, 1);
         StreamMetadata reopened = streams.openStream(NODE_2, EPOCH_2, streamId, 2);
         assertEquals(NODE_2, reopened.nodeId());
@@ -99,10 +93,7 @@ public class StreamControlManagerTest {
         CompactStreamObjectRequest compact = new CompactStreamObjectRequest(
             objectId, 10, streamId, 1, 0, 0, List.of(), List.of(), 0);
         objects.compactStreamObject(NODE_1, EPOCH_1, compact, 1);
-
         streams.closeStream(NODE_1, EPOCH_1, streamId, 1);
-        // Mirror the state machine's DELETE_STREAM apply path: delete the stream,
-        // then mark its objects destroyed. Retrying is a no-op.
         streams.deleteStream(NODE_1, EPOCH_1, streamId, 1);
         objects.onStreamDeleted(streamId);
         streams.deleteStream(NODE_1, EPOCH_1, streamId, 1);
@@ -116,7 +107,6 @@ public class StreamControlManagerTest {
         long stream2 = streams.createStream(NODE_2, EPOCH_2);
         streams.openStream(NODE_1, EPOCH_1, stream1, 1);
         streams.openStream(NODE_2, EPOCH_2, stream2, 1);
-
         assertEquals(1, streams.getOpeningStreams(NODE_1).size());
         assertEquals(stream1, streams.getOpeningStreams(NODE_1).get(0).streamId());
         assertEquals(1, streams.getOpeningStreams(NODE_2).size());
@@ -128,7 +118,6 @@ public class StreamControlManagerTest {
         long streamId = streams.createStream(NODE_1, EPOCH_1);
         streams.openStream(NODE_1, EPOCH_1, streamId, 1);
         long objectId = objects.prepareObject(NODE_1, EPOCH_1, 1, 60_000, 0);
-
         CommitStreamSetObjectRequest request = new CommitStreamSetObjectRequest();
         request.setObjectId(objectId);
         request.setOrderId(objectId);
@@ -136,7 +125,6 @@ public class StreamControlManagerTest {
         request.setStreamRanges(List.of(new ObjectStreamRange(streamId, 1, 0, 8, 64)));
         objects.commitStreamSetObject(NODE_1, EPOCH_1, request, 1);
         assertEquals(8, streams.getStream(streamId).endOffset());
-
         MetadataException e = assertThrows(MetadataException.class,
             () -> objects.commitStreamSetObject(NODE_1, EPOCH_1, request, 2));
         assertTrue(e.isRedundant());
@@ -152,7 +140,6 @@ public class StreamControlManagerTest {
         CompactStreamObjectRequest compact = new CompactStreamObjectRequest(
             objectId, 10, streamId, 1, 0, 0, List.of(), List.of(), 0);
         objects.compactStreamObject(NODE_1, EPOCH_1, compact, 1);
-
         MetadataException e = assertThrows(MetadataException.class,
             () -> objects.compactStreamObject(NODE_1, EPOCH_1, compact, 2));
         assertTrue(e.isRedundant());
@@ -171,11 +158,9 @@ public class StreamControlManagerTest {
         objects.markDestroyObjects(
             List.of(1L, 2L, 3L),
             List.of(CompactOperations.KEEP_DATA, CompactOperations.DELETE, CompactOperations.DEEP_DELETE));
-
         var peeked = objects.peekDestroyedObjects(10);
         assertEquals(3, peeked.size());
         assertEquals(3, objects.markDestroyedObjects().size());
-
         objects.cleanDestroyedObjects(List.of(1L, 2L));
         assertEquals(1, objects.markDestroyedObjects().size());
         assertEquals(CompactOperations.DEEP_DELETE, objects.markDestroyedObjects().get(3L));

@@ -39,11 +39,8 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Protocol-agnostic node bootstrap: metadata, storage, WAL, compaction, and core services.
- * HTTP facades bind on top of {@link #service()}.
- */
 public final class StreamStackNode implements AutoCloseable {
+
     private static final Logger LOGGER = LoggerFactory.getLogger(StreamStackNode.class);
 
     private final ServerConfig config;
@@ -54,25 +51,24 @@ public final class StreamStackNode implements AutoCloseable {
     private final S3StreamClient streamClient;
     private final CompactionManager compactionManager;
     private final S3StreamService streamService;
+    private final RaftKVClient kvClient;
     private final StreamService service;
+
     private final AtomicBoolean started = new AtomicBoolean(false);
 
     public StreamStackNode(ServerConfig config) throws Exception {
         this.config = Objects.requireNonNull(config, "config");
         Files.createDirectories(config.dataDir().toPath());
         File objectDir = config.objectDir();
-        if (objectDir != null) {
+        if (Objects.nonNull(objectDir)) {
             Files.createDirectories(objectDir.toPath());
         }
-
         config.streamConfig().allocPolicy().ifPresent(ByteBufAlloc::setPolicy);
-
         BucketURI storageBucket = BucketURI.parse(config.storageUri());
         this.objectStorage = ObjectStorageFactory.instance()
             .builder(storageBucket)
             .threadPrefix("data")
             .build();
-
         this.metadataNode = new MetadataNode(
             config.nodeId(),
             config.raftHost(),
@@ -83,10 +79,8 @@ public final class StreamStackNode implements AutoCloseable {
             objectStorage,
             MetadataNode.Options.defaults(),
             config.httpAddress());
-
         RaftStreamManager streamManager = new RaftStreamManager(metadataNode);
         RaftObjectManager objectManager = new RaftObjectManager(metadataNode);
-
         Config streamConfig = new Config();
         streamConfig.nodeId(config.nodeId());
         streamConfig.nodeEpoch(config.nodeEpoch());
@@ -97,11 +91,9 @@ public final class StreamStackNode implements AutoCloseable {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("invalid stream config: " + e.getMessage(), e);
         }
-
         String walUri = config.resolveWalUri();
         WalBundle walBundle = createWal(walUri, storageBucket, objectStorage);
         this.walObjectStorage = walBundle.objectStorage();
-
         this.storage = new S3Storage(
             streamConfig,
             walBundle.wal(),
@@ -115,7 +107,7 @@ public final class StreamStackNode implements AutoCloseable {
             });
         this.streamClient = new S3StreamClient(streamManager, storage, objectManager, objectStorage, streamConfig);
         this.compactionManager = new CompactionManager(streamConfig, objectManager, streamManager, objectStorage);
-        RaftKVClient kvClient = new RaftKVClient(metadataNode);
+        this.kvClient = new RaftKVClient(metadataNode);
         this.streamService = new S3StreamService(streamClient, kvClient, metadataNode, new StreamWaiterRegistry());
         RaftOwnershipService ownership = new RaftOwnershipService(metadataNode, streamService);
         this.service = new StreamService(streamService, streamService, streamService, ownership);
@@ -146,7 +138,7 @@ public final class StreamStackNode implements AutoCloseable {
     }
 
     private static boolean isMemoryWal(String walUri) {
-        if (walUri == null || walUri.isBlank()) {
+        if (Objects.isNull(walUri) || walUri.isBlank()) {
             return true;
         }
         String normalized = walUri.trim().toLowerCase();
@@ -194,6 +186,10 @@ public final class StreamStackNode implements AutoCloseable {
         return metadataNode;
     }
 
+    public RaftKVClient kvClient() {
+        return kvClient;
+    }
+
     public S3StreamService streamService() {
         return streamService;
     }
@@ -222,7 +218,7 @@ public final class StreamStackNode implements AutoCloseable {
             storage.shutdown();
         } catch (Exception ignored) {
         }
-        if (walObjectStorage != null) {
+        if (Objects.nonNull(walObjectStorage)) {
             try {
                 walObjectStorage.close();
             } catch (Exception ignored) {

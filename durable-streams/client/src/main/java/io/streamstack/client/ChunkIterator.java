@@ -1,5 +1,7 @@
 package io.streamstack.client;
 
+import java.util.Objects;
+
 import io.streamstack.client.internal.SseStreamingReader;
 import io.streamstack.client.model.Chunk;
 import io.streamstack.model.LiveMode;
@@ -14,25 +16,25 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.TimeoutException;
 
 public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, AutoCloseable {
+
     private final DurableStream client;
     private final String url;
     private final LiveMode liveMode;
     private final Duration timeout;
-
     private Offset currentOffset;
     private String cursor;
     private boolean upToDate;
+    private boolean streamClosed;
     private boolean closed;
     private Chunk nextChunk;
     private boolean hasNextComputed;
-
     private SseStreamingReader sseReader;
     private boolean sseStarted;
 
     ChunkIterator(DurableStream client, String url, ReadRequest request, Duration timeout) {
         this.client = client;
         this.url = url;
-        this.currentOffset = request.offset() != null ? request.offset() : Offset.beginning();
+        this.currentOffset = Objects.nonNull(request.offset()) ? request.offset() : Offset.beginning();
         this.liveMode = request.live();
         this.timeout = timeout;
         this.cursor = request.cursor();
@@ -49,14 +51,17 @@ public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, Au
             return false;
         }
         if (hasNextComputed) {
-            return nextChunk != null;
+            return Objects.nonNull(nextChunk);
         }
-        if (liveMode == null && upToDate) {
+        if (Objects.isNull(liveMode) && upToDate) {
+            return false;
+        }
+        if (streamClosed) {
             return false;
         }
         nextChunk = fetchNext();
         hasNextComputed = true;
-        return nextChunk != null;
+        return Objects.nonNull(nextChunk);
     }
 
     @Override
@@ -72,10 +77,10 @@ public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, Au
     }
 
     public Chunk poll(Duration pollTimeout) {
-        if (closed) {
+        if (closed || streamClosed) {
             return null;
         }
-        if (liveMode == null && upToDate) {
+        if (Objects.isNull(liveMode) && upToDate) {
             return null;
         }
         if (liveMode == LiveMode.SSE) {
@@ -83,7 +88,7 @@ public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, Au
         }
         Chunk chunk;
         try {
-            chunk = client.readOnce(url, new ReadRequest(currentOffset, liveMode, cursor, null), pollTimeout);
+            chunk = client.readOnce(url, new ReadRequest(currentOffset, liveMode, cursor), pollTimeout);
         } catch (DurableStreamException e) {
             Throwable cause = e.getCause();
             if (cause instanceof HttpTimeoutException || cause instanceof TimeoutException) {
@@ -93,10 +98,11 @@ public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, Au
             throw e;
         }
         if (chunk.statusCode() == 204) {
-            if (chunk.nextOffset() != null) {
+            if (Objects.nonNull(chunk.nextOffset())) {
                 currentOffset = chunk.nextOffset();
             }
             upToDate = true;
+            streamClosed = chunk.closed() && chunk.upToDate();
             return null;
         }
         updateState(chunk);
@@ -104,33 +110,43 @@ public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, Au
     }
 
     public Offset currentOffset() {
-        if (sseReader != null && sseReader.currentOffset() != null) {
+        if (Objects.nonNull(sseReader) && Objects.nonNull(sseReader.currentOffset())) {
             return sseReader.currentOffset();
         }
         return currentOffset;
     }
 
     public boolean upToDate() {
-        if (sseReader != null) {
+        if (Objects.nonNull(sseReader)) {
             return sseReader.upToDate();
         }
         return upToDate;
     }
 
+    public boolean streamClosed() {
+        if (Objects.nonNull(sseReader)) {
+            return sseReader.streamClosed() || streamClosed;
+        }
+        return streamClosed;
+    }
+
     @Override
     public void close() {
         closed = true;
-        if (sseReader != null) {
+        if (Objects.nonNull(sseReader)) {
             sseReader.close();
         }
     }
 
     private void updateState(Chunk chunk) {
-        if (chunk.nextOffset() != null) {
+        if (Objects.nonNull(chunk.nextOffset())) {
             currentOffset = chunk.nextOffset();
         }
         cursor = chunk.cursor().orElse(null);
         upToDate = chunk.upToDate();
+        if (chunk.closed() && chunk.upToDate()) {
+            streamClosed = true;
+        }
     }
 
     private Chunk pollSse(Duration pollTimeout) {
@@ -138,9 +154,9 @@ public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, Au
         if (sseReader.closed()) {
             return null;
         }
-        long timeoutMs = pollTimeout != null ? pollTimeout.toMillis() : 30_000L;
+        long timeoutMs = Objects.nonNull(pollTimeout) ? pollTimeout.toMillis() : 30_000L;
         Chunk chunk = sseReader.poll(timeoutMs);
-        if (chunk != null) {
+        if (Objects.nonNull(chunk)) {
             updateState(chunk);
         }
         return chunk;
@@ -150,16 +166,16 @@ public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, Au
         if (liveMode == LiveMode.SSE) {
             return fetchNextSse();
         }
-        Chunk chunk = client.readOnce(url, new ReadRequest(currentOffset, liveMode, cursor, null), timeout);
+        Chunk chunk = client.readOnce(url, new ReadRequest(currentOffset, liveMode, cursor), timeout);
         if (chunk.statusCode() == 204) {
-            if (liveMode == null) {
+            if (Objects.isNull(liveMode)) {
                 upToDate = true;
                 return null;
             }
             return chunk;
         }
-        if (liveMode == null && chunk.data().length == 0 && chunk.upToDate()) {
-            if (chunk.nextOffset() != null) {
+        if (Objects.isNull(liveMode) && chunk.data().length == 0 && chunk.upToDate()) {
+            if (Objects.nonNull(chunk.nextOffset())) {
                 currentOffset = chunk.nextOffset();
             }
             upToDate = true;
@@ -173,7 +189,7 @@ public final class ChunkIterator implements Iterator<Chunk>, Iterable<Chunk>, Au
         if (sseReader.closed()) {
             return null;
         }
-        long timeoutMs = timeout != null ? timeout.toMillis() : 60_000L;
+        long timeoutMs = Objects.nonNull(timeout) ? timeout.toMillis() : 60_000L;
         return sseReader.poll(timeoutMs);
     }
 

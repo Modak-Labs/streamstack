@@ -1,7 +1,8 @@
 package io.streamstack.metadata.codec;
 
-import io.streamstack.metadata.model.MetadataCommand;
+import java.util.Objects;
 
+import io.streamstack.metadata.model.MetadataCommand;
 import io.streamstack.s3.compact.CompactOperations;
 import io.streamstack.s3.objects.CommitStreamSetObjectRequest;
 import io.streamstack.s3.objects.CompactStreamObjectRequest;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class MetadataCommandCodec {
+
     private static final short VERSION = 1;
 
     private MetadataCommandCodec() {
@@ -226,7 +228,7 @@ public final class MetadataCommandCodec {
     }
 
     private static void writeString(ByteBuffer buf, String value) {
-        byte[] bytes = value == null ? new byte[0] : value.getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = Objects.isNull(value) ? new byte[0] : value.getBytes(StandardCharsets.UTF_8);
         buf.putInt(bytes.length);
         buf.put(bytes);
     }
@@ -251,7 +253,7 @@ public final class MetadataCommandCodec {
     }
 
     private static int stringSize(String value) {
-        return 4 + (value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length);
+        return 4 + (Objects.isNull(value) ? 0 : value.getBytes(StandardCharsets.UTF_8).length);
     }
 
     private static int bytesSize(byte[] value) {

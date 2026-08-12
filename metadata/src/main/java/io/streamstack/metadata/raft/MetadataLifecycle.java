@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import io.streamstack.metadata.model.MetadataCommand;
 import io.streamstack.s3.operator.ObjectStorage;
 
@@ -13,11 +15,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class MetadataLifecycle implements AutoCloseable {
+
     private static final Logger LOGGER = LoggerFactory.getLogger(MetadataLifecycle.class);
 
     private final MetadataClient client;
     private final ObjectCleaner objectCleaner;
+
     private final AtomicBoolean leader = new AtomicBoolean(false);
+
     private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> expireFuture;
     private ScheduledFuture<?> cleanFuture;
@@ -52,7 +57,7 @@ public final class MetadataLifecycle implements AutoCloseable {
         cancel(cleanFuture);
         expireFuture = null;
         cleanFuture = null;
-        if (scheduler != null) {
+        if (Objects.nonNull(scheduler)) {
             scheduler.shutdownNow();
             scheduler = null;
         }
@@ -64,7 +69,7 @@ public final class MetadataLifecycle implements AutoCloseable {
         }
         client.propose(new MetadataCommand.ExpirePreparedObjects(System.currentTimeMillis()))
             .whenComplete((r, e) -> {
-                if (e != null) {
+                if (Objects.nonNull(e)) {
                     LOGGER.debug("expire prepared objects failed", e);
                 }
             });
@@ -82,7 +87,7 @@ public final class MetadataLifecycle implements AutoCloseable {
     }
 
     private static void cancel(ScheduledFuture<?> future) {
-        if (future != null) {
+        if (Objects.nonNull(future)) {
             future.cancel(false);
         }
     }

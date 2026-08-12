@@ -15,9 +15,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 public final class StreamControlManager {
+
     private long nextAssignedStreamId;
+
     private final Map<Long, StreamMetadata> streamsMetadata = new HashMap<>();
+
     private final Map<Integer, Long> nodeEpochs = new HashMap<>();
+
     private final Map<Integer, String> nodeAddresses = new HashMap<>();
     private final ConcurrentHashMap<Long, CopyOnWriteArrayList<StreamMetadataListener>> listeners =
         new ConcurrentHashMap<>();
@@ -48,12 +52,12 @@ public final class StreamControlManager {
 
     public void registerNode(int nodeId, long nodeEpoch, String httpAddress) {
         Long current = nodeEpochs.get(nodeId);
-        if (current != null && current > nodeEpoch) {
+        if (Objects.nonNull(current) && current > nodeEpoch) {
             throw MetadataException.nodeEpochMismatch(
                 "node " + nodeId + " epoch " + current + " fences register with epoch " + nodeEpoch);
         }
         nodeEpochs.put(nodeId, nodeEpoch);
-        if (httpAddress != null && !httpAddress.isEmpty()) {
+        if (Objects.nonNull(httpAddress) && !httpAddress.isEmpty()) {
             nodeAddresses.put(nodeId, httpAddress);
         }
     }
@@ -64,7 +68,7 @@ public final class StreamControlManager {
 
     public void nodeEpochCheck(int nodeId, long nodeEpoch) {
         Long current = nodeEpochs.get(nodeId);
-        if (current == null) {
+        if (Objects.isNull(current)) {
             throw MetadataException.nodeEpochMismatch("node " + nodeId + " is not registered");
         }
         if (current != nodeEpoch) {
@@ -140,7 +144,7 @@ public final class StreamControlManager {
     public void deleteStream(int nodeId, long nodeEpoch, long streamId, long epoch) {
         nodeEpochCheck(nodeId, nodeEpoch);
         StreamMetadata stream = streamsMetadata.get(streamId);
-        if (stream == null) {
+        if (Objects.isNull(stream)) {
             return;
         }
         if (stream.state() != StreamState.CLOSED) {
@@ -200,7 +204,7 @@ public final class StreamControlManager {
         listeners.computeIfAbsent(streamId, id -> new CopyOnWriteArrayList<>()).add(listener);
         return () -> {
             CopyOnWriteArrayList<StreamMetadataListener> list = listeners.get(streamId);
-            if (list != null) {
+            if (Objects.nonNull(list)) {
                 list.remove(listener);
             }
         };
@@ -208,11 +212,11 @@ public final class StreamControlManager {
 
     public Runnable notification(long streamId) {
         StreamMetadata metadata = streamsMetadata.get(streamId);
-        if (metadata == null) {
+        if (Objects.isNull(metadata)) {
             return null;
         }
         CopyOnWriteArrayList<StreamMetadataListener> list = listeners.get(streamId);
-        if (list == null || list.isEmpty()) {
+        if (Objects.isNull(list) || list.isEmpty()) {
             return null;
         }
         StreamMetadata copy = copyOf(metadata);
@@ -238,7 +242,7 @@ public final class StreamControlManager {
         this.nodeEpochs.clear();
         this.nodeEpochs.putAll(nodeEpochs);
         this.nodeAddresses.clear();
-        if (nodeAddresses != null) {
+        if (Objects.nonNull(nodeAddresses)) {
             this.nodeAddresses.putAll(nodeAddresses);
         }
     }
@@ -261,7 +265,7 @@ public final class StreamControlManager {
 
     private StreamMetadata requireStream(long streamId) {
         StreamMetadata stream = streamsMetadata.get(streamId);
-        if (stream == null) {
+        if (Objects.isNull(stream)) {
             throw MetadataException.streamNotExist(streamId);
         }
         return stream;

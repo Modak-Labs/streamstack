@@ -1,5 +1,6 @@
 package io.streamstack.model.request;
 
+import java.util.Objects;
 import java.time.Instant;
 
 public record CreateRequest(
@@ -10,6 +11,6 @@ public record CreateRequest(
     byte[] initialBody) {
 
     public CreateRequest {
-        initialBody = initialBody == null ? new byte[0] : initialBody;
+        initialBody = Objects.isNull(initialBody) ? new byte[0] : initialBody;
     }
 }

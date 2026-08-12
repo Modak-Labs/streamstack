@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import io.streamstack.metadata.stream.KVControlManager;
 import io.streamstack.metadata.stream.S3ObjectControlManager;
 import io.streamstack.metadata.stream.S3ObjectControlManager.OwnedS3Object;
@@ -22,6 +24,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 public final class MetadataSnapshotCodec {
+
     private static final short VERSION = 1;
 
     private MetadataSnapshotCodec() {
@@ -45,21 +48,18 @@ public final class MetadataSnapshotCodec {
             buf.put(stream.state().toByte());
             buf.putInt(stream.nodeId());
         }
-
         Map<Integer, Long> nodeEpochs = new TreeMap<>(streams.nodeEpochs());
         buf.putInt(nodeEpochs.size());
         for (Map.Entry<Integer, Long> entry : nodeEpochs.entrySet()) {
             buf.putInt(entry.getKey());
             buf.putLong(entry.getValue());
         }
-
         Map<Integer, String> nodeAddresses = new TreeMap<>(streams.nodeAddresses());
         buf.putInt(nodeAddresses.size());
         for (Map.Entry<Integer, String> entry : nodeAddresses.entrySet()) {
             buf.putInt(entry.getKey());
             writeString(buf, entry.getValue());
         }
-
         buf.putLong(objects.nextAssignedObjectId());
         Map<Long, Long> prepared = new TreeMap<>(objects.preparedObjectDeadlines());
         buf.putInt(prepared.size());
@@ -67,7 +67,6 @@ public final class MetadataSnapshotCodec {
             buf.putLong(entry.getKey());
             buf.putLong(entry.getValue());
         }
-
         Map<Long, List<S3ObjectMetadata>> streamObjects = new TreeMap<>(objects.streamObjects());
         buf.putInt(streamObjects.size());
         for (Map.Entry<Long, List<S3ObjectMetadata>> entry : streamObjects.entrySet()) {
@@ -77,7 +76,6 @@ public final class MetadataSnapshotCodec {
                 writeObjectMetadata(buf, metadata);
             }
         }
-
         Map<Long, OwnedS3Object> streamSetObjects = new TreeMap<>(objects.streamSetObjects());
         buf.putInt(streamSetObjects.size());
         for (Map.Entry<Long, OwnedS3Object> entry : streamSetObjects.entrySet()) {
@@ -85,21 +83,18 @@ public final class MetadataSnapshotCodec {
             buf.putInt(entry.getValue().nodeId());
             writeObjectMetadata(buf, entry.getValue().metadata());
         }
-
         Map<Long, CompactOperations> markDestroyed = new TreeMap<>(objects.markDestroyedObjects());
         buf.putInt(markDestroyed.size());
         for (Map.Entry<Long, CompactOperations> entry : markDestroyed.entrySet()) {
             buf.putLong(entry.getKey());
             buf.put(entry.getValue().value());
         }
-
         Map<String, byte[]> kvEntries = kv.snapshot();
         buf.putInt(kvEntries.size());
         for (Map.Entry<String, byte[]> entry : kvEntries.entrySet()) {
             writeString(buf, entry.getKey());
             writeBytes(buf, entry.getValue());
         }
-
         byte[] out = new byte[buf.position()];
         buf.flip();
         buf.get(out);
@@ -134,27 +129,23 @@ public final class MetadataSnapshotCodec {
             metadata.nodeId(nodeId);
             streamMap.put(streamId, metadata);
         }
-
         int nodeEpochCount = buf.getInt();
         Map<Integer, Long> nodeEpochs = new HashMap<>(nodeEpochCount);
         for (int i = 0; i < nodeEpochCount; i++) {
             nodeEpochs.put(buf.getInt(), buf.getLong());
         }
-
         int nodeAddressCount = buf.getInt();
         Map<Integer, String> nodeAddresses = new HashMap<>(nodeAddressCount);
         for (int i = 0; i < nodeAddressCount; i++) {
             nodeAddresses.put(buf.getInt(), readString(buf));
         }
         streams.replaceAll(nextStreamId, streamMap, nodeEpochs, nodeAddresses);
-
         long nextObjectId = buf.getLong();
         int preparedCount = buf.getInt();
         Map<Long, Long> prepared = new HashMap<>(preparedCount);
         for (int i = 0; i < preparedCount; i++) {
             prepared.put(buf.getLong(), buf.getLong());
         }
-
         int streamObjectKeys = buf.getInt();
         Map<Long, List<S3ObjectMetadata>> streamObjects = new HashMap<>(streamObjectKeys);
         for (int i = 0; i < streamObjectKeys; i++) {
@@ -166,7 +157,6 @@ public final class MetadataSnapshotCodec {
             }
             streamObjects.put(streamId, list);
         }
-
         int streamSetCount = buf.getInt();
         Map<Long, OwnedS3Object> streamSetObjects = new HashMap<>(streamSetCount);
         for (int i = 0; i < streamSetCount; i++) {
@@ -175,14 +165,12 @@ public final class MetadataSnapshotCodec {
             S3ObjectMetadata metadata = readObjectMetadata(buf);
             streamSetObjects.put(objectId, new OwnedS3Object(nodeId, metadata));
         }
-
         int destroyedCount = buf.getInt();
         Map<Long, CompactOperations> markDestroyed = new LinkedHashMap<>();
         for (int i = 0; i < destroyedCount; i++) {
             markDestroyed.put(buf.getLong(), CompactOperations.fromValue(buf.get()));
         }
         objects.replaceAll(nextObjectId, prepared, streamObjects, streamSetObjects, markDestroyed);
-
         int kvCount = buf.getInt();
         Map<String, byte[]> kvEntries = new HashMap<>(kvCount);
         for (int i = 0; i < kvCount; i++) {
@@ -252,7 +240,7 @@ public final class MetadataSnapshotCodec {
     }
 
     private static void writeString(ByteBuffer buf, String value) {
-        byte[] bytes = value == null ? new byte[0] : value.getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = Objects.isNull(value) ? new byte[0] : value.getBytes(StandardCharsets.UTF_8);
         buf.putInt(bytes.length);
         buf.put(bytes);
     }
@@ -277,6 +265,6 @@ public final class MetadataSnapshotCodec {
     }
 
     private static int stringSize(String value) {
-        return 4 + (value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length);
+        return 4 + (Objects.isNull(value) ? 0 : value.getBytes(StandardCharsets.UTF_8).length);
     }
 }

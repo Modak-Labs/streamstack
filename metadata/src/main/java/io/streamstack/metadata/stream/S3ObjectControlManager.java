@@ -1,5 +1,7 @@
 package io.streamstack.metadata.stream;
 
+import java.util.Objects;
+
 import io.streamstack.metadata.MetadataException;
 import io.streamstack.s3.compact.CompactOperations;
 import io.streamstack.s3.metadata.ObjectUtils;
@@ -22,11 +24,17 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 public final class S3ObjectControlManager {
+
     private long nextAssignedObjectId;
+
     private final Map<Long, Long> preparedObjectDeadlines = new HashMap<>();
+
     private final Map<Long, List<S3ObjectMetadata>> streamObjects = new HashMap<>();
+
     private final Map<Long, OwnedS3Object> streamSetObjects = new HashMap<>();
+
     private final Map<Long, CompactOperations> markDestroyedObjects = new LinkedHashMap<>();
+
     private final StreamControlManager streamControlManager;
 
     public S3ObjectControlManager(StreamControlManager streamControlManager) {
@@ -84,14 +92,13 @@ public final class S3ObjectControlManager {
     public void commitStreamSetObject(int nodeId, long nodeEpoch, CommitStreamSetObjectRequest request, long nowMs) {
         streamControlManager.nodeEpochCheck(nodeId, nodeEpoch);
         redundantCommitCheck(request);
-
         long dataTimeInMs = nowMs;
         boolean compact = !request.getCompactedObjectIds().isEmpty();
         if (compact) {
             List<Long> compactedIds = request.getCompactedObjectIds();
             for (long id : compactedIds) {
                 OwnedS3Object owned = streamSetObjects.get(id);
-                if (owned == null) {
+                if (Objects.isNull(owned)) {
                     throw MetadataException.unexpected("compacted stream-set object " + id + " not found");
                 }
                 dataTimeInMs = Math.min(owned.metadata().dataTimeInMs(), dataTimeInMs);
@@ -101,7 +108,6 @@ public final class S3ObjectControlManager {
                 markDestroyedObjects.put(id, CompactOperations.DELETE);
             }
         }
-
         if (request.getObjectId() != ObjectUtils.NOOP_OBJECT_ID) {
             commitPrepared(request.getObjectId());
             for (ObjectStreamRange range : request.getStreamRanges()) {
@@ -118,7 +124,6 @@ public final class S3ObjectControlManager {
                 request.getOrderId());
             streamSetObjects.put(request.getObjectId(), new OwnedS3Object(nodeId, object));
         }
-
         for (StreamObject streamObject : request.getStreamObjects()) {
             commitPrepared(streamObject.getObjectId());
             long streamId = streamObject.getStreamId();
@@ -163,7 +168,7 @@ public final class S3ObjectControlManager {
                 "compact object " + request.getObjectId() + " already committed for stream " + streamId);
         }
         var stream = streamControlManager.getStream(streamId);
-        if (stream == null) {
+        if (Objects.isNull(stream)) {
             throw MetadataException.streamNotExist(streamId);
         }
         if (stream.epoch() != request.getStreamEpoch()) {
@@ -181,7 +186,6 @@ public final class S3ObjectControlManager {
                 "stream " + streamId + " start offset " + stream.startOffset()
                     + " is greater than request " + request.getStartOffset());
         }
-
         commitPrepared(request.getObjectId());
         streamObjectList(streamId).add(
             new S3ObjectMetadata(
@@ -198,10 +202,10 @@ public final class S3ObjectControlManager {
     }
 
     public void markDestroyObjects(List<Long> ids, List<CompactOperations> ops) {
-        if (ids == null || ids.isEmpty()) {
+        if (Objects.isNull(ids) || ids.isEmpty()) {
             return;
         }
-        if (ops == null || ops.isEmpty()) {
+        if (Objects.isNull(ops) || ops.isEmpty()) {
             for (Long id : ids) {
                 markDestroyedObjects.put(id, CompactOperations.DELETE);
             }
@@ -235,7 +239,7 @@ public final class S3ObjectControlManager {
 
     public void onStreamDeleted(long streamId) {
         List<S3ObjectMetadata> objects = streamObjects.remove(streamId);
-        if (objects != null) {
+        if (Objects.nonNull(objects)) {
             for (S3ObjectMetadata metadata : objects) {
                 markDestroyedObjects.put(metadata.objectId(), CompactOperations.DELETE);
             }
@@ -313,7 +317,7 @@ public final class S3ObjectControlManager {
 
     private boolean streamObjectCommitted(long streamId, long objectId) {
         List<S3ObjectMetadata> list = streamObjects.get(streamId);
-        if (list == null) {
+        if (Objects.isNull(list)) {
             return false;
         }
         return list.stream().anyMatch(m -> m.objectId() == objectId);
@@ -349,16 +353,13 @@ public final class S3ObjectControlManager {
     public static final class OwnedS3Object {
         private final int nodeId;
         private final S3ObjectMetadata metadata;
-
         public OwnedS3Object(int nodeId, S3ObjectMetadata metadata) {
             this.nodeId = nodeId;
             this.metadata = metadata;
         }
-
         public int nodeId() {
             return nodeId;
         }
-
         public S3ObjectMetadata metadata() {
             return metadata;
         }

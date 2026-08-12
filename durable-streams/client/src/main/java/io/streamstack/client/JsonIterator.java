@@ -1,5 +1,7 @@
 package io.streamstack.client;
 
+import java.util.Objects;
+
 import io.streamstack.client.model.Chunk;
 import io.streamstack.client.model.JsonBatch;
 import io.streamstack.model.Offset;
@@ -14,6 +16,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<JsonBatch<T>>, AutoCloseable {
+
     private final ChunkIterator chunkIterator;
     private final Function<String, List<T>> parser;
     private JsonBatch<T> nextBatch;
@@ -32,7 +35,7 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
     @Override
     public boolean hasNext() {
         if (hasNextComputed) {
-            return nextBatch != null;
+            return Objects.nonNull(nextBatch);
         }
         hasNextComputed = true;
         if (!chunkIterator.hasNext()) {
@@ -56,7 +59,7 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
 
     public JsonBatch<T> poll(Duration timeout) {
         Chunk chunk = chunkIterator.poll(timeout);
-        if (chunk == null) {
+        if (Objects.isNull(chunk)) {
             return null;
         }
         return parseChunk(chunk);
@@ -82,6 +85,10 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
         return chunkIterator.upToDate();
     }
 
+    public boolean streamClosed() {
+        return chunkIterator.streamClosed();
+    }
+
     @Override
     public void close() {
         chunkIterator.close();
@@ -90,7 +97,7 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
     private JsonBatch<T> parseChunk(Chunk chunk) {
         String json = chunk.dataAsString();
         List<T> items;
-        if (json == null || json.isEmpty()) {
+        if (Objects.isNull(json) || json.isEmpty()) {
             items = List.of();
         } else {
             try {
@@ -105,14 +112,12 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
     private static final class FlattenedIterator<T> implements Iterator<T> {
         private final JsonIterator<T> jsonIterator;
         private Iterator<T> currentBatch;
-
         FlattenedIterator(JsonIterator<T> jsonIterator) {
             this.jsonIterator = jsonIterator;
         }
-
         @Override
         public boolean hasNext() {
-            while (currentBatch == null || !currentBatch.hasNext()) {
+            while (Objects.isNull(currentBatch) || !currentBatch.hasNext()) {
                 if (!jsonIterator.hasNext()) {
                     return false;
                 }
@@ -120,7 +125,6 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
             }
             return true;
         }
-
         @Override
         public T next() {
             if (!hasNext()) {

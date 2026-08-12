@@ -1,5 +1,6 @@
 package io.streamstack.client.internal;
 
+import java.util.Objects;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -8,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 public final class SseParser {
+
     private final BufferedReader reader;
     private boolean closed;
 
@@ -25,7 +27,7 @@ public final class SseParser {
         String id = null;
         Integer retry = null;
         String line;
-        while ((line = reader.readLine()) != null) {
+        while (Objects.nonNull((line = reader.readLine()))) {
             if (line.isEmpty()) {
                 if (data.length() > 0) {
                     if (data.charAt(data.length() - 1) == '\n') {
@@ -89,26 +91,21 @@ public final class SseParser {
         private final String data;
         private final String id;
         private final Integer retry;
-
         public SseEvent(String event, String data, String id, Integer retry) {
             this.event = event;
             this.data = data;
             this.id = id;
             this.retry = retry;
         }
-
         public String event() {
             return event;
         }
-
         public String data() {
             return data;
         }
-
         public Optional<String> id() {
             return Optional.ofNullable(id);
         }
-
         public Optional<Integer> retry() {
             return Optional.ofNullable(retry);
         }

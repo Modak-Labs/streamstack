@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class MultiNodeRoutingIntegrationTest {
+
     @TempDir
     Path tempDir;
 
@@ -33,12 +34,10 @@ public class MultiNodeRoutingIntegrationTest {
             "127.0.0.1:" + raftA,
             "127.0.0.1:" + raftB,
             "127.0.0.1:" + raftC);
-
         ServerConfig configA = nodeConfig(1, httpA, raftA, peers, tempDir.resolve("a"), tempDir.resolve("shared-objects"));
         ServerConfig configB = nodeConfig(2, httpB, raftB, peers, tempDir.resolve("b"), tempDir.resolve("shared-objects"));
         ServerConfig configC = nodeConfig(3, TestPorts.freePort(), raftC, peers, tempDir.resolve("c"),
             tempDir.resolve("shared-objects"));
-
         DurableStreamsServer serverA = new DurableStreamsServer(configA);
         DurableStreamsServer serverB = new DurableStreamsServer(configB);
         DurableStreamsServer serverC = new DurableStreamsServer(configC);
@@ -46,7 +45,6 @@ public class MultiNodeRoutingIntegrationTest {
             serverA.start();
             serverB.start();
             serverC.start();
-
             HttpClient noRedirect = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(Duration.ofSeconds(5))
@@ -55,7 +53,6 @@ public class MultiNodeRoutingIntegrationTest {
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
-
             String path = "/streams/owned";
             HttpResponse<String> create = follow.send(
                 HttpRequest.newBuilder(URI.create(serverA.baseUrl() + path))
@@ -64,8 +61,6 @@ public class MultiNodeRoutingIntegrationTest {
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(201, create.statusCode());
-
-            // Append via B without following redirects — should 307 to A (owner).
             HttpResponse<String> redirected = noRedirect.send(
                 HttpRequest.newBuilder(URI.create(serverB.baseUrl() + path))
                     .header("Content-Type", "text/plain")
@@ -74,8 +69,6 @@ public class MultiNodeRoutingIntegrationTest {
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(307, redirected.statusCode());
             assertTrue(redirected.headers().firstValue("Location").orElse("").startsWith(serverA.baseUrl()));
-
-            // Append via B following redirects — lands on owner and succeeds.
             HttpResponse<String> appended = follow.send(
                 HttpRequest.newBuilder(URI.create(serverB.baseUrl() + path))
                     .header("Content-Type", "text/plain")
@@ -83,14 +76,11 @@ public class MultiNodeRoutingIntegrationTest {
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(204, appended.statusCode());
-
             HttpResponse<byte[]> read = follow.send(
                 HttpRequest.newBuilder(URI.create(serverA.baseUrl() + path + "?offset=-1")).GET().build(),
                 HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(200, read.statusCode());
             assertEquals("from-b", new String(read.body(), StandardCharsets.UTF_8));
-
-            // Kill owner A; B should take ownership and continue serving.
             serverA.close();
             HttpResponse<String> afterFailover = null;
             for (int i = 0; i < 20; i++) {
@@ -140,7 +130,6 @@ public class MultiNodeRoutingIntegrationTest {
         try {
             server.close();
         } catch (Exception ignored) {
-            // ignore
         }
     }
 }

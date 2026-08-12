@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import io.streamstack.metadata.model.MetadataCommand;
 import io.streamstack.s3.metadata.StreamMetadata;
 import io.streamstack.s3.streams.StreamCloseHook;
@@ -11,8 +13,10 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 public final class RaftStreamManager implements StreamManager {
+
     private final MetadataNode metadataNode;
     private final MetadataClient client;
+
     private StreamCloseHook streamCloseHook = streamId -> CompletableFuture.completedFuture(null);
 
     public RaftStreamManager(MetadataNode metadataNode) {
@@ -74,6 +78,6 @@ public final class RaftStreamManager implements StreamManager {
 
     @Override
     public void setStreamCloseHook(StreamCloseHook hook) {
-        this.streamCloseHook = hook == null ? streamId -> CompletableFuture.completedFuture(null) : hook;
+        this.streamCloseHook = Objects.isNull(hook) ? streamId -> CompletableFuture.completedFuture(null) : hook;
     }
 }

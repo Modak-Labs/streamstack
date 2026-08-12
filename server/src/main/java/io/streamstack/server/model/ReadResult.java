@@ -1,5 +1,6 @@
 package io.streamstack.server.model;
 
+import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -11,7 +12,7 @@ public record ReadResult(
     boolean closed) {
 
     public ReadResult {
-        records = records == null ? List.of() : List.copyOf(records);
+        records = Objects.isNull(records) ? List.of() : List.copyOf(records);
     }
 
     public List<byte[]> payloads() {

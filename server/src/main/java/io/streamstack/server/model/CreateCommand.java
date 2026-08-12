@@ -14,12 +14,12 @@ public record CreateCommand(
     public CreateCommand {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(contentType, "contentType");
-        if (ttlSeconds != null && expiresAt != null) {
+        if (Objects.nonNull(ttlSeconds) && Objects.nonNull(expiresAt)) {
             throw new IllegalArgumentException("ttlSeconds and expiresAt are mutually exclusive");
         }
-        if (ttlSeconds != null && ttlSeconds < 0) {
+        if (Objects.nonNull(ttlSeconds) && ttlSeconds < 0) {
             throw new IllegalArgumentException("ttlSeconds must be >= 0");
         }
-        initialPayload = initialPayload == null ? new byte[0] : initialPayload;
+        initialPayload = Objects.isNull(initialPayload) ? new byte[0] : initialPayload;
     }
 }

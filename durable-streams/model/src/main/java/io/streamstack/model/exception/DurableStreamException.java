@@ -2,10 +2,8 @@ package io.streamstack.model.exception;
 
 import java.util.Optional;
 
-/**
- * Base protocol error for Durable Streams operations.
- */
 public class DurableStreamException extends RuntimeException {
+
     private final Integer statusCode;
 
     public DurableStreamException(String message) {

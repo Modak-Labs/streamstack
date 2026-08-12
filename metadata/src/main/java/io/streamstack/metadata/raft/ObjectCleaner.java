@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import io.streamstack.metadata.model.MetadataCommand;
 import io.streamstack.s3.compact.CompactOperations;
 import io.streamstack.s3.metadata.ObjectUtils;
@@ -12,8 +14,8 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public final class ObjectCleaner {
-    public static final int MAX_DELETE_BATCH_COUNT = 2000;
 
+    public static final int MAX_DELETE_BATCH_COUNT = 2000;
     private final MetadataClient client;
     private final ObjectStorage objectStorage;
 
@@ -29,7 +31,6 @@ public final class ObjectCleaner {
         if (marked.isEmpty()) {
             return List.of();
         }
-
         List<Long> deletable = new ArrayList<>();
         List<Long> catalogOnly = new ArrayList<>();
         for (Map.Entry<Long, CompactOperations> entry : marked.entrySet()) {
@@ -39,9 +40,8 @@ public final class ObjectCleaner {
                 deletable.add(entry.getKey());
             }
         }
-
         List<Long> cleaned = new ArrayList<>(catalogOnly);
-        if (!deletable.isEmpty() && objectStorage != null) {
+        if (!deletable.isEmpty() && Objects.nonNull(objectStorage)) {
             List<ObjectStorage.ObjectPath> paths = new ArrayList<>(deletable.size());
             short bucketId = objectStorage.bucketId();
             for (Long objectId : deletable) {
@@ -50,7 +50,6 @@ public final class ObjectCleaner {
             objectStorage.delete(paths).get(30, TimeUnit.SECONDS);
             cleaned.addAll(deletable);
         }
-
         if (cleaned.isEmpty()) {
             return List.of();
         }

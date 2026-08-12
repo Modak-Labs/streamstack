@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ServerConfigTopologyTest {
+
     @TempDir
     Path tempDir;
 
@@ -49,13 +50,11 @@ public class ServerConfigTopologyTest {
                 raftPort: 8092
                 dataDir: /tmp/streamstack/n2
             """);
-
         ServerConfig config = ServerConfig.fromArgs(new String[]{
             "--topo", topo.toString(),
             "--node-id", "1",
             "--http-port", "9999"
         });
-
         assertEquals(1, config.nodeId());
         assertEquals("poc", config.clusterId());
         assertEquals(9999, config.httpPort());

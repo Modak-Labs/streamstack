@@ -1,5 +1,7 @@
 package io.streamstack.model.request;
 
+import java.util.Objects;
+
 public record AppendRequest(
     String contentType,
     byte[] body,
@@ -10,10 +12,6 @@ public record AppendRequest(
     boolean close) {
 
     public AppendRequest {
-        body = body == null ? new byte[0] : body;
-    }
-
-    public boolean hasProducer() {
-        return producerId != null;
+        body = Objects.isNull(body) ? new byte[0] : body;
     }
 }

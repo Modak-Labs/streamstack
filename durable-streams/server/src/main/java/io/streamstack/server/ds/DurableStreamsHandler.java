@@ -5,7 +5,6 @@ import io.streamstack.model.LiveMode;
 import io.streamstack.model.Offset;
 import io.streamstack.model.Protocol;
 import io.streamstack.model.request.AppendRequest;
-import io.streamstack.model.request.ReadRequest;
 import io.streamstack.model.response.AppendResponse;
 import io.streamstack.model.response.CreateResponse;
 import io.streamstack.model.response.HeadResponse;
@@ -24,13 +23,10 @@ import java.util.Base64;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 
-/**
- * Durable Streams protocol entry: method dispatch, orchestration, and response writing.
- */
 public final class DurableStreamsHandler {
+
     private static final String DEFAULT_CT = "application/octet-stream";
     private static final String STRICT_INT = "0|[1-9][0-9]*";
-
     private final StreamService service;
     private final Duration longPollTimeout;
     private final Duration sseMaxDuration;
@@ -46,8 +42,8 @@ public final class DurableStreamsHandler {
         Duration sseMaxDuration,
         int maxChunkSize) {
         this.service = Objects.requireNonNull(service, "service");
-        this.longPollTimeout = longPollTimeout == null ? Duration.ofSeconds(25) : longPollTimeout;
-        this.sseMaxDuration = sseMaxDuration == null ? Duration.ofSeconds(55) : sseMaxDuration;
+        this.longPollTimeout = Objects.isNull(longPollTimeout) ? Duration.ofSeconds(25) : longPollTimeout;
+        this.sseMaxDuration = Objects.isNull(sseMaxDuration) ? Duration.ofSeconds(55) : sseMaxDuration;
         this.maxChunkSize = maxChunkSize > 0 ? maxChunkSize : 64 * 1024;
     }
 
@@ -63,6 +59,9 @@ public final class DurableStreamsHandler {
                 default -> fail(ctx, 405, "method not allowed");
             }
         } catch (StreamServiceException e) {
+            if (abortIfCommitted(ctx)) {
+                return;
+            }
             switch (e.kind()) {
                 case NOT_FOUND -> respond(ctx, 404, null, false);
                 case BAD_REQUEST -> fail(ctx, 400, e.getMessage());
@@ -71,34 +70,40 @@ public final class DurableStreamsHandler {
                     ctx.status(403);
                     ctx.header(Protocol.H_CONTENT_TYPE, "text/plain; charset=utf-8");
                     ctx.header(Protocol.H_CACHE_CONTROL, "no-store");
-                    if (e.producerEpoch() != null) {
+                    if (Objects.nonNull(e.producerEpoch())) {
                         ctx.header(Protocol.H_PRODUCER_EPOCH, Long.toString(e.producerEpoch()));
                     }
-                    ctx.result(e.getMessage() == null ? "Stale producer epoch" : e.getMessage());
+                    ctx.result(Objects.isNull(e.getMessage()) ? "Stale producer epoch" : e.getMessage());
                 }
                 case SEQUENCE_GAP -> {
                     secure(ctx);
                     ctx.status(409);
                     ctx.header(Protocol.H_CONTENT_TYPE, "text/plain; charset=utf-8");
                     ctx.header(Protocol.H_CACHE_CONTROL, "no-store");
-                    if (e.expectedSeq() != null) {
+                    if (Objects.nonNull(e.expectedSeq())) {
                         ctx.header(Protocol.H_PRODUCER_EXPECTED_SEQ, Long.toString(e.expectedSeq()));
                     }
-                    if (e.receivedSeq() != null) {
+                    if (Objects.nonNull(e.receivedSeq())) {
                         ctx.header(Protocol.H_PRODUCER_RECEIVED_SEQ, Long.toString(e.receivedSeq()));
                     }
-                    ctx.result(e.getMessage() == null ? "Producer sequence gap" : e.getMessage());
+                    ctx.result(Objects.isNull(e.getMessage()) ? "Producer sequence gap" : e.getMessage());
                 }
                 case CONFLICT, CLOSED -> respond(ctx, 409, e.nextOffset(), e.closed());
             }
         } catch (IllegalArgumentException e) {
+            if (abortIfCommitted(ctx)) {
+                return;
+            }
             fail(ctx, 400, e.getMessage());
         } catch (Exception e) {
+            if (abortIfCommitted(ctx)) {
+                return;
+            }
             Throwable root = e;
-            while (root.getCause() != null && root.getCause() != root) {
+            while (Objects.nonNull(root.getCause()) && root.getCause() != root) {
                 root = root.getCause();
             }
-            String message = root.getMessage() == null ? e.toString() : root.getMessage();
+            String message = Objects.isNull(root.getMessage()) ? e.toString() : root.getMessage();
             if (isContentTooLarge(message)) {
                 fail(ctx, 413, message);
                 return;
@@ -123,15 +128,14 @@ public final class DurableStreamsHandler {
     private void put(Context ctx) throws Exception {
         String name = streamName(ctx);
         byte[] body = ctx.bodyAsBytes();
-        if (body == null) {
+        if (Objects.isNull(body)) {
             body = new byte[0];
         }
         Long ttlSeconds = parseLong(ctx.header(Protocol.H_STREAM_TTL), "invalid Stream-TTL");
         Instant expiresAt = parseInstant(ctx.header(Protocol.H_STREAM_EXPIRES_AT), "invalid Stream-Expires-At");
-        if (ttlSeconds != null && expiresAt != null) {
+        if (Objects.nonNull(ttlSeconds) && Objects.nonNull(expiresAt)) {
             throw new IllegalArgumentException("Stream-TTL and Stream-Expires-At both set");
         }
-
         CreateResponse response = ProtocolConverter.toCreateResponse(service.lifecycle().create(
             ProtocolConverter.toCreateCommand(
                 name,
@@ -153,8 +157,8 @@ public final class DurableStreamsHandler {
         String producerId = ctx.header(Protocol.H_PRODUCER_ID);
         String epochRaw = ctx.header(Protocol.H_PRODUCER_EPOCH);
         String seqRaw = ctx.header(Protocol.H_PRODUCER_SEQ);
-        boolean anyProducer = producerId != null || epochRaw != null || seqRaw != null;
-        boolean allProducer = producerId != null && epochRaw != null && seqRaw != null;
+        boolean anyProducer = Objects.nonNull(producerId) || Objects.nonNull(epochRaw) || Objects.nonNull(seqRaw);
+        boolean allProducer = Objects.nonNull(producerId) && Objects.nonNull(epochRaw) && Objects.nonNull(seqRaw);
         if (anyProducer && !allProducer) {
             throw new IllegalArgumentException(
                 "All producer headers (Producer-Id, Producer-Epoch, Producer-Seq) must be provided together");
@@ -168,19 +172,17 @@ public final class DurableStreamsHandler {
             producerEpoch = parseStrictLong(epochRaw, "Invalid Producer-Epoch: must be a non-negative integer");
             producerSeq = parseStrictLong(seqRaw, "Invalid Producer-Seq: must be a non-negative integer");
         }
-
         byte[] body = ctx.bodyAsBytes();
-        if (body == null) {
+        if (Objects.isNull(body)) {
             body = new byte[0];
         }
         String contentType = ctx.header(Protocol.H_CONTENT_TYPE);
         if (body.length == 0 && !close) {
             throw new IllegalArgumentException("Empty body");
         }
-        if (body.length > 0 && (contentType == null || contentType.isEmpty())) {
+        if (body.length > 0 && (Objects.isNull(contentType) || contentType.isEmpty())) {
             throw new IllegalArgumentException("missing Content-Type");
         }
-
         AppendRequest request = new AppendRequest(
             contentType,
             body,
@@ -191,30 +193,29 @@ public final class DurableStreamsHandler {
             close);
         AppendResponse response = ProtocolConverter.toAppendResponse(
             service.append().append(ProtocolConverter.toAppendCommand(name, request)));
-
-        int status = allProducer && response.appended() ? 200 : 204;
-        respond(ctx, status, ProtocolConverter.toToken(response.nextOffset()), response.closed());
-        if (response.producerEpoch() != null) {
+        boolean producerAppended = allProducer && response.appended();
+        respond(ctx, producerAppended ? 200 : 204, ProtocolConverter.toToken(response.nextOffset()), response.closed());
+        if (Objects.nonNull(response.producerEpoch())) {
             ctx.header(Protocol.H_PRODUCER_EPOCH, Long.toString(response.producerEpoch()));
         }
-        if (response.producerSeq() != null) {
+        if (Objects.nonNull(response.producerSeq())) {
             ctx.header(Protocol.H_PRODUCER_SEQ, Long.toString(response.producerSeq()));
         }
     }
 
     private void head(Context ctx) throws Exception {
         StreamMeta meta = service.lifecycle().head(streamName(ctx)).orElse(null);
-        if (meta == null) {
+        if (Objects.isNull(meta)) {
             respond(ctx, 404, null, false);
             return;
         }
         HeadResponse response = ProtocolConverter.toHeadResponse(meta);
         respond(ctx, 200, ProtocolConverter.toToken(response.nextOffset()), response.closed());
         ctx.header(Protocol.H_CONTENT_TYPE, response.contentType());
-        if (response.ttlSeconds() != null) {
+        if (Objects.nonNull(response.ttlSeconds())) {
             ctx.header(Protocol.H_STREAM_TTL, Long.toString(response.ttlSeconds()));
         }
-        if (response.expiresAt() != null) {
+        if (Objects.nonNull(response.expiresAt())) {
             ctx.header(Protocol.H_STREAM_EXPIRES_AT, response.expiresAt().toString());
         }
     }
@@ -223,24 +224,19 @@ public final class DurableStreamsHandler {
         String name = streamName(ctx);
         String liveRaw = ctx.queryParam(Protocol.Q_LIVE);
         String offsetRaw = ctx.queryParam(Protocol.Q_OFFSET);
-        boolean offsetNow = offsetRaw != null && Offset.NOW.equalsIgnoreCase(offsetRaw);
+        boolean offsetNow = Objects.nonNull(offsetRaw) && Offset.NOW.equalsIgnoreCase(offsetRaw);
         LiveMode live = LiveMode.parse(liveRaw);
-        OffsetToken offset = parseOffset(name, offsetRaw, live != null);
-        ReadRequest request = new ReadRequest(
-            ProtocolConverter.toOffset(offset),
-            live,
-            ctx.queryParam(Protocol.Q_CURSOR),
-            maxChunkSize);
-
-        if (request.live() == null) {
+        OffsetToken offset = parseOffset(name, offsetRaw, Objects.nonNull(live));
+        String cursor = ctx.queryParam(Protocol.Q_CURSOR);
+        if (Objects.isNull(live)) {
             writeRead(ctx, name, offset,
                 ProtocolConverter.toReadResponse(service.read().read(name, offset, maxChunkSize, 0)),
                 false, offsetNow);
             return;
         }
-        switch (request.live()) {
-            case LONG_POLL -> longPoll(ctx, name, offset, request.cursor());
-            case SSE -> sse(ctx, name, offset, request.cursor());
+        switch (live) {
+            case LONG_POLL -> longPoll(ctx, name, offset, cursor);
+            case SSE -> sse(ctx, name, offset, cursor);
         }
     }
 
@@ -257,7 +253,7 @@ public final class DurableStreamsHandler {
             return;
         }
         StreamMeta meta = service.lifecycle().head(name).orElse(null);
-        if (meta == null) {
+        if (Objects.isNull(meta)) {
             respond(ctx, 404, null, false);
             return;
         }
@@ -268,7 +264,7 @@ public final class DurableStreamsHandler {
 
     private void sse(Context ctx, String name, OffsetToken start, String cursorRaw) throws Exception {
         StreamMeta meta = service.lifecycle().head(name).orElse(null);
-        if (meta == null) {
+        if (Objects.isNull(meta)) {
             respond(ctx, 404, null, false);
             return;
         }
@@ -330,7 +326,7 @@ public final class DurableStreamsHandler {
         } else {
             ctx.header(Protocol.H_CACHE_CONTROL, Protocol.CACHE_CATCH_UP);
         }
-        if (out.nextOffset() != null) {
+        if (Objects.nonNull(out.nextOffset())) {
             ctx.header(Protocol.H_STREAM_NEXT_OFFSET, out.nextOffset().value());
         }
         if (out.closed() && out.upToDate()) {
@@ -340,18 +336,16 @@ public final class DurableStreamsHandler {
             ctx.header(Protocol.H_STREAM_UP_TO_DATE, Protocol.BOOL_TRUE);
         }
         ctx.header(Protocol.H_CONTENT_TYPE, orDefault(out.contentType(), DEFAULT_CT));
-
         if (!live && !offsetNow) {
             String etag = etag(name, start, ProtocolConverter.toToken(out.nextOffset()), out.closed() && emptyTail);
             ctx.header(Protocol.H_ETAG, etag);
             String inm = ctx.header(Protocol.H_IF_NONE_MATCH);
-            if (inm != null && inm.equals(etag)) {
+            if (Objects.nonNull(inm) && inm.equals(etag)) {
                 ctx.status(304);
                 ctx.result("");
                 return;
             }
         }
-
         if (!(emptyTail && live)) {
             if (json) {
                 ctx.result(SseEncoder.jsonArrayBody(out.messages()));
@@ -362,8 +356,8 @@ public final class DurableStreamsHandler {
     }
 
     private static String etag(String path, OffsetToken start, OffsetToken end, boolean closedAtTail) {
-        String startVal = start == null ? "-1" : start.value();
-        String endVal = end == null ? startVal : end.value();
+        String startVal = Objects.isNull(start) ? "-1" : start.value();
+        String endVal = Objects.isNull(end) ? startVal : end.value();
         String encoded = Base64.getEncoder().encodeToString(path.getBytes(StandardCharsets.UTF_8));
         String value = encoded + ":" + startVal + ":" + endVal + (closedAtTail ? ":c" : "");
         return "\"" + value + "\"";
@@ -371,7 +365,7 @@ public final class DurableStreamsHandler {
 
     private static long cursor(String raw) {
         long interval = System.currentTimeMillis() / 20_000L;
-        if (raw != null && !raw.isEmpty()) {
+        if (Objects.nonNull(raw) && !raw.isEmpty()) {
             try {
                 long client = Long.parseLong(raw);
                 if (interval <= client) {
@@ -384,7 +378,7 @@ public final class DurableStreamsHandler {
     }
 
     private OffsetToken parseOffset(String name, String raw, boolean required) throws Exception {
-        if (raw == null) {
+        if (Objects.isNull(raw)) {
             if (required) {
                 throw new IllegalArgumentException("offset required");
             }
@@ -399,7 +393,7 @@ public final class DurableStreamsHandler {
 
     private static String streamName(Context ctx) {
         String path = ctx.path();
-        return path == null || path.isEmpty() ? "/" : path;
+        return Objects.isNull(path) || path.isEmpty() ? "/" : path;
     }
 
     private static URI streamUri(Context ctx) {
@@ -415,7 +409,7 @@ public final class DurableStreamsHandler {
         secure(ctx);
         ctx.status(status);
         ctx.header(Protocol.H_CACHE_CONTROL, "no-store");
-        if (next != null) {
+        if (Objects.nonNull(next)) {
             ctx.header(Protocol.H_STREAM_NEXT_OFFSET, next.value());
         }
         if (closed) {
@@ -428,7 +422,7 @@ public final class DurableStreamsHandler {
         ctx.status(status);
         ctx.header(Protocol.H_CONTENT_TYPE, "text/plain; charset=utf-8");
         ctx.header(Protocol.H_CACHE_CONTROL, "no-store");
-        ctx.result(message == null ? "error" : message);
+        ctx.result(Objects.isNull(message) ? "error" : message);
     }
 
     private static void secure(Context ctx) {
@@ -436,8 +430,19 @@ public final class DurableStreamsHandler {
         ctx.header("Cross-Origin-Resource-Policy", "same-origin");
     }
 
+    private static boolean abortIfCommitted(Context ctx) {
+        if (!ctx.res().isCommitted()) {
+            return false;
+        }
+        try {
+            ctx.res().getOutputStream().close();
+        } catch (Exception ignored) {
+        }
+        return true;
+    }
+
     private static boolean isContentTooLarge(String message) {
-        if (message == null) {
+        if (Objects.isNull(message)) {
             return false;
         }
         String lower = message.toLowerCase();
@@ -451,11 +456,11 @@ public final class DurableStreamsHandler {
     }
 
     private static String orDefault(String value, String fallback) {
-        return value == null || value.isEmpty() ? fallback : value;
+        return Objects.isNull(value) || value.isEmpty() ? fallback : value;
     }
 
     private static Long parseLong(String raw, String error) {
-        if (raw == null || raw.isEmpty()) {
+        if (Objects.isNull(raw) || raw.isEmpty()) {
             return null;
         }
         if (!raw.matches(STRICT_INT)) {
@@ -469,7 +474,7 @@ public final class DurableStreamsHandler {
     }
 
     private static long parseStrictLong(String raw, String error) {
-        if (raw == null || !raw.matches("\\d+")) {
+        if (Objects.isNull(raw) || !raw.matches("\\d+")) {
             throw new IllegalArgumentException(error);
         }
         try {
@@ -484,7 +489,7 @@ public final class DurableStreamsHandler {
     }
 
     private static Instant parseInstant(String raw, String error) {
-        if (raw == null || raw.isEmpty()) {
+        if (Objects.isNull(raw) || raw.isEmpty()) {
             return null;
         }
         try {

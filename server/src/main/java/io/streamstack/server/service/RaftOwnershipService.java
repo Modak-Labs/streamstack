@@ -12,8 +12,8 @@ import java.util.OptionalLong;
 import java.util.concurrent.TimeUnit;
 
 public final class RaftOwnershipService implements OwnershipService {
-    private static final long OP_TIMEOUT_SEC = 10;
 
+    private static final long OP_TIMEOUT_SEC = 10;
     private final MetadataNode metadataNode;
     private final S3StreamService streamService;
 
@@ -41,7 +41,7 @@ public final class RaftOwnershipService implements OwnershipService {
                     return Owner.local(OptionalLong.of(id));
                 }
                 String address = metadataNode.stateMachine().streamControlManager().getNodeAddress(ownerId);
-                if (address == null || address.isEmpty()) {
+                if (Objects.isNull(address) || address.isEmpty()) {
                     return Owner.local(OptionalLong.of(id));
                 }
                 return Owner.remote(id, ownerId, address);
@@ -51,7 +51,7 @@ public final class RaftOwnershipService implements OwnershipService {
         } catch (Exception e) {
             throw new StreamServiceException(
                 StreamServiceException.Kind.BAD_REQUEST, null, false,
-                e.getMessage() == null ? "ownership lookup failed" : e.getMessage());
+                Objects.isNull(e.getMessage()) ? "ownership lookup failed" : e.getMessage());
         }
     }
 

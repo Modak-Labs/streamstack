@@ -1,6 +1,9 @@
 package io.streamstack.model;
 
+import java.util.Objects;
+
 public enum LiveMode {
+
     LONG_POLL(Protocol.LIVE_LONG_POLL),
     SSE(Protocol.LIVE_SSE);
 
@@ -15,7 +18,7 @@ public enum LiveMode {
     }
 
     public static LiveMode parse(String raw) {
-        if (raw == null || raw.isEmpty()) {
+        if (Objects.isNull(raw) || raw.isEmpty()) {
             return null;
         }
         if (Protocol.LIVE_LONG_POLL.equals(raw)) {

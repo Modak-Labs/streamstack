@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import com.alipay.sofa.jraft.RouteTable;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.closure.ReadIndexClosure;
@@ -26,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 public final class MetadataClient implements AutoCloseable {
+
     private static final Logger LOGGER = LoggerFactory.getLogger(MetadataClient.class);
 
     private final MetadataNode node;
@@ -70,7 +73,7 @@ public final class MetadataClient implements AutoCloseable {
     private void attempt(MetadataCommand command, int attempt, CompletableFuture<Object> future) {
         if (node.isLeader()) {
             node.propose(command).whenComplete((result, error) -> {
-                if (error == null) {
+                if (Objects.isNull(error)) {
                     future.complete(result);
                     return;
                 }
@@ -84,7 +87,7 @@ public final class MetadataClient implements AutoCloseable {
             return;
         }
         PeerId leader = discoverLeader();
-        if (leader == null) {
+        if (Objects.isNull(leader)) {
             retryOrFail(command, attempt, future,
                 new MetadataNode.NotLeaderException(null));
             return;
@@ -92,7 +95,7 @@ public final class MetadataClient implements AutoCloseable {
         MetadataCommandRequest request = new MetadataCommandRequest(MetadataCommandCodec.encode(command));
         try {
             cliClientService.getRpcClient().invokeAsync(leader.getEndpoint(), request, (result, err) -> {
-                if (err != null) {
+                if (Objects.nonNull(err)) {
                     RouteTable.getInstance().updateLeader(groupId, (PeerId) null);
                     retryOrFail(command, attempt, future, err);
                     return;
@@ -102,7 +105,7 @@ public final class MetadataClient implements AutoCloseable {
                     case MetadataCommandResponse.OK ->
                         future.complete(MetadataResultCodec.decode(response.getResult()));
                     case MetadataCommandResponse.NOT_LEADER -> {
-                        if (response.getLeaderId() != null) {
+                        if (Objects.nonNull(response.getLeaderId())) {
                             RouteTable.getInstance().updateLeader(groupId, response.getLeaderId());
                         } else {
                             RouteTable.getInstance().updateLeader(groupId, (PeerId) null);
@@ -135,7 +138,7 @@ public final class MetadataClient implements AutoCloseable {
     private PeerId discoverLeader() {
         RouteTable routeTable = RouteTable.getInstance();
         PeerId leader = routeTable.selectLeader(groupId);
-        if (leader != null) {
+        if (Objects.nonNull(leader)) {
             return leader;
         }
         try {
@@ -166,7 +169,7 @@ public final class MetadataClient implements AutoCloseable {
                     return;
                 }
                 node.stateMachine().awaitApplied(index).whenCompleteAsync((ignored, error) -> {
-                    if (error != null) {
+                    if (Objects.nonNull(error)) {
                         future.completeExceptionally(unwrap(error));
                         return;
                     }
@@ -194,7 +197,7 @@ public final class MetadataClient implements AutoCloseable {
 
     private static Throwable unwrap(Throwable t) {
         Throwable cur = t;
-        while (cur instanceof CompletionException && cur.getCause() != null) {
+        while (cur instanceof CompletionException && Objects.nonNull(cur.getCause())) {
             cur = cur.getCause();
         }
         return cur;

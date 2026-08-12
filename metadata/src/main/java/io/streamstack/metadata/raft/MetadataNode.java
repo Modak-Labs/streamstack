@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.RaftGroupService;
 import com.alipay.sofa.jraft.Status;
@@ -31,7 +33,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class MetadataNode implements AutoCloseable {
+
     public static final String DEFAULT_GROUP_ID = "streamstack-metadata";
+
     private static final Logger LOGGER = LoggerFactory.getLogger(MetadataNode.class);
 
     private final int nodeId;
@@ -45,6 +49,7 @@ public final class MetadataNode implements AutoCloseable {
     private final MetadataLifecycle lifecycle;
     private final MetadataHealth health;
     private final ScheduledExecutorService registrar;
+
     private final AtomicBoolean registered = new AtomicBoolean(false);
 
     public record Options(
@@ -52,7 +57,6 @@ public final class MetadataNode implements AutoCloseable {
         int snapshotIntervalSecs,
         int snapshotLogIndexMargin,
         boolean syncLog) {
-
         public static Options defaults() {
             return new Options(1000, 30, 0, true);
         }
@@ -96,10 +100,9 @@ public final class MetadataNode implements AutoCloseable {
         String httpAddress) throws IOException {
         this.nodeId = nodeId;
         this.nodeEpoch = nodeEpoch;
-        this.httpAddress = httpAddress == null ? "" : httpAddress;
+        this.httpAddress = Objects.isNull(httpAddress) ? "" : httpAddress;
         this.serverId = new PeerId(host, port);
         this.stateMachine = new MetadataStateMachine();
-
         Files.createDirectories(dataDir.toPath());
         File logDir = new File(dataDir, "log");
         File metaDir = new File(dataDir, "meta");
@@ -107,7 +110,6 @@ public final class MetadataNode implements AutoCloseable {
         Files.createDirectories(logDir.toPath());
         Files.createDirectories(metaDir.toPath());
         Files.createDirectories(snapshotDir.toPath());
-
         NodeOptions nodeOptions = new NodeOptions();
         nodeOptions.setElectionTimeoutMs(options.electionTimeoutMs());
         nodeOptions.setDisableCli(false);
@@ -120,7 +122,6 @@ public final class MetadataNode implements AutoCloseable {
         nodeOptions.setLogUri(logDir.getAbsolutePath());
         nodeOptions.setRaftMetaUri(metaDir.getAbsolutePath());
         nodeOptions.setSnapshotUri(snapshotDir.getAbsolutePath());
-
         Configuration conf = new Configuration();
         for (String peer : peers) {
             PeerId peerId = new PeerId();
@@ -130,7 +131,6 @@ public final class MetadataNode implements AutoCloseable {
             conf.addPeer(peerId);
         }
         nodeOptions.setInitialConf(conf);
-
         RpcServer rpcServer = RaftRpcServerFactory.createRaftRpcServer(serverId.getEndpoint());
         rpcServer.registerProcessor(new MetadataCommandProcessor(this));
         this.raftGroupService = new RaftGroupService(DEFAULT_GROUP_ID, serverId, nodeOptions, rpcServer);
@@ -157,7 +157,7 @@ public final class MetadataNode implements AutoCloseable {
         }
         client.propose(new MetadataCommand.RegisterNode(nodeId, nodeEpoch, httpAddress))
             .whenComplete((result, error) -> {
-                if (error == null) {
+                if (Objects.isNull(error)) {
                     if (registered.compareAndSet(false, true)) {
                         LOGGER.info("metadata node {} registered with epoch {}", nodeId, nodeEpoch);
                     }
@@ -219,7 +219,7 @@ public final class MetadataNode implements AutoCloseable {
     public void awaitLeader(long timeout, TimeUnit unit) throws InterruptedException {
         long deadline = System.nanoTime() + unit.toNanos(timeout);
         while (System.nanoTime() < deadline) {
-            if (node.getLeaderId() != null) {
+            if (Objects.nonNull(node.getLeaderId())) {
                 return;
             }
             Thread.sleep(50);
@@ -242,7 +242,7 @@ public final class MetadataNode implements AutoCloseable {
         if (!node.isLeader()) {
             PeerId leader = node.getLeaderId();
             return CompletableFuture.failedFuture(
-                new NotLeaderException(leader == null ? null : leader.toString()));
+                new NotLeaderException(Objects.isNull(leader) ? null : leader.toString()));
         }
         byte[] data = MetadataCommandCodec.encode(command);
         MetadataClosure closure = new MetadataClosure(command);
@@ -304,7 +304,7 @@ public final class MetadataNode implements AutoCloseable {
         registrar.shutdownNow();
         lifecycle.close();
         client.close();
-        if (raftGroupService != null) {
+        if (Objects.nonNull(raftGroupService)) {
             raftGroupService.shutdown();
             try {
                 raftGroupService.join();
@@ -316,12 +316,10 @@ public final class MetadataNode implements AutoCloseable {
 
     public static final class NotLeaderException extends RuntimeException {
         private final String leaderId;
-
         public NotLeaderException(String leaderId) {
-            super(leaderId == null ? "no leader" : "not leader, leader=" + leaderId);
+            super(Objects.isNull(leaderId) ? "no leader" : "not leader, leader=" + leaderId);
             this.leaderId = leaderId;
         }
-
         public String leaderId() {
             return leaderId;
         }

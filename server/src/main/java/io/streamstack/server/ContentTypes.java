@@ -1,8 +1,10 @@
 package io.streamstack.server;
 
+import java.util.Objects;
 import java.util.Locale;
 
 public final class ContentTypes {
+
     private ContentTypes() {
     }
 
@@ -11,7 +13,7 @@ public final class ContentTypes {
     }
 
     public static String mimeOf(String contentType) {
-        if (contentType == null) {
+        if (Objects.isNull(contentType)) {
             return "";
         }
         int semi = contentType.indexOf(';');

@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import com.alipay.sofa.jraft.Closure;
 import com.alipay.sofa.jraft.Iterator;
 import com.alipay.sofa.jraft.Status;
@@ -36,24 +38,32 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
 public final class MetadataStateMachine extends StateMachineAdapter {
-    private static final Logger LOGGER = LoggerFactory.getLogger(MetadataStateMachine.class);
-    private static final String SNAPSHOT_FILE = "metadata_snapshot.bin";
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(MetadataStateMachine.class);
+
+    private static final String SNAPSHOT_FILE = "metadata_snapshot.bin";
     private final StreamControlManager streamControlManager;
     private final S3ObjectControlManager objectControlManager;
     private final KVControlManager kvControlManager;
+
     private final ReentrantReadWriteLock stateLock = new ReentrantReadWriteLock();
+
     private final AtomicLong leaderTerm = new AtomicLong(-1);
+
     private final AtomicLong appliedIndex = new AtomicLong(0);
+
     private final AtomicLong applySuccessCount = new AtomicLong(0);
+
     private final AtomicLong applyFailCount = new AtomicLong(0);
     private final ConcurrentSkipListMap<Long, CopyOnWriteArrayList<CompletableFuture<Void>>> applyWaiters =
         new ConcurrentSkipListMap<>();
+
     private final ExecutorService listenerExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "metadata-listener-dispatch");
         t.setDaemon(true);
         return t;
     });
+
     private volatile MetadataLifecycle lifecycle;
 
     public MetadataStateMachine() {
@@ -140,7 +150,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
             MetadataClosure closure = null;
             MetadataCommand command;
             try {
-                if (iter.done() != null) {
+                if (Objects.nonNull(iter.done())) {
                     closure = (MetadataClosure) iter.done();
                     command = closure.command();
                 } else {
@@ -154,7 +164,6 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                 iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, t.getMessage()));
                 return;
             }
-
             Runnable notification = null;
             try {
                 Object result;
@@ -166,12 +175,12 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                     stateLock.writeLock().unlock();
                 }
                 applySuccessCount.incrementAndGet();
-                if (closure != null) {
+                if (Objects.nonNull(closure)) {
                     closure.success(result);
                 }
             } catch (MetadataException e) {
                 applyFailCount.incrementAndGet();
-                if (closure != null) {
+                if (Objects.nonNull(closure)) {
                     closure.failure(e);
                 } else {
                     LOGGER.debug("metadata command rejected deterministically: {}", e.getMessage());
@@ -183,7 +192,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                 return;
             }
             advanceAppliedIndex(iter.getIndex());
-            if (notification != null) {
+            if (Objects.nonNull(notification)) {
                 listenerExecutor.execute(notification);
             }
             iter.next();
@@ -326,7 +335,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                 stateLock.writeLock().unlock();
             }
             RaftOutter.SnapshotMeta meta = reader.load();
-            if (meta != null) {
+            if (Objects.nonNull(meta)) {
                 advanceAppliedIndex(meta.getLastIncludedIndex());
             }
             return true;
@@ -340,7 +349,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
     public void onLeaderStart(long term) {
         leaderTerm.set(term);
         MetadataLifecycle current = lifecycle;
-        if (current != null) {
+        if (Objects.nonNull(current)) {
             current.onLeaderStart();
         }
     }
@@ -349,7 +358,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
     public void onLeaderStop(Status status) {
         leaderTerm.set(-1);
         MetadataLifecycle current = lifecycle;
-        if (current != null) {
+        if (Objects.nonNull(current)) {
             current.onLeaderStop();
         }
     }

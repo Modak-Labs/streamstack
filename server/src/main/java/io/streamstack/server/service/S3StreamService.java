@@ -2,6 +2,7 @@ package io.streamstack.server.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.streamstack.DefaultRecordBatch;
 import io.streamstack.api.CreateStreamOptions;
 import io.streamstack.api.FetchResult;
@@ -16,6 +17,7 @@ import io.streamstack.api.StreamClient;
 import io.streamstack.metadata.raft.MetadataNode;
 import io.streamstack.s3.metadata.StreamMetadata;
 import io.streamstack.s3.metadata.StreamState;
+import io.streamstack.server.BatchFraming;
 import io.streamstack.server.ContentTypes;
 import io.streamstack.server.StreamWaiterRegistry;
 import io.streamstack.server.model.AppendCommand;
@@ -47,15 +49,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class S3StreamService implements StreamLifecycleService, AppendService, ReadService {
+
     private static final long OP_TIMEOUT_SEC = 30;
+
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final StreamClient streamClient;
     private final KVClient kvClient;
     private final MetadataNode metadataNode;
     private final StreamWaiterRegistry waiters;
+
     private final ConcurrentHashMap<Long, Stream> openStreams = new ConcurrentHashMap<>();
+
     private final ConcurrentHashMap<Long, AtomicLong> localEpochs = new ConcurrentHashMap<>();
+
     private final ConcurrentHashMap<String, Object> nameLocks = new ConcurrentHashMap<>();
 
     public S3StreamService(
@@ -76,20 +83,18 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         synchronized (lock) {
             try {
                 RegistryEntry existing = getEntry(name, false);
-                if (existing != null) {
+                if (Objects.nonNull(existing)) {
                     if (!configMatches(existing, command.contentType(), command.ttlSeconds(), command.expiresAt(),
                         command.closed())) {
                         throw new StreamServiceException(StreamServiceException.Kind.CONFLICT);
                     }
                     return new CreateResult(false, toMeta(name, existing));
                 }
-
                 Stream stream = streamClient.createAndOpenStream(
                     CreateStreamOptions.builder().epoch(1).replicaCount(1).tag("path", name).build())
                     .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
                 openStreams.put(stream.streamId(), stream);
                 localEpochs.put(stream.streamId(), new AtomicLong(stream.streamEpoch()));
-
                 long deadline = deadlineOf(command.ttlSeconds(), command.expiresAt());
                 RegistryEntry candidate = new RegistryEntry(
                     stream.streamId(), command.contentType(), command.ttlSeconds(), command.expiresAt(),
@@ -97,7 +102,6 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                 Value stored = kvClient.putKVIfAbsent(KeyValue.of(name, ByteBuffer.wrap(candidate.encode())))
                     .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
                 RegistryEntry current = RegistryEntry.decode(toBytes(stored));
-
                 if (current.streamId() != candidate.streamId()) {
                     try {
                         stream.destroy().get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
@@ -111,7 +115,6 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                     }
                     return new CreateResult(false, toMeta(name, current));
                 }
-
                 if (command.initialPayload().length > 0) {
                     List<byte[]> messages = splitMessages(command.contentType(), command.initialPayload(), true);
                     for (byte[] message : messages) {
@@ -139,7 +142,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         try {
             String normalized = normalize(name);
             RegistryEntry entry = getEntry(normalized, false);
-            return entry == null ? Optional.empty() : Optional.of(toMeta(normalized, entry));
+            return Objects.isNull(entry) ? Optional.empty() : Optional.of(toMeta(normalized, entry));
         } catch (Exception e) {
             throw wrap(e);
         }
@@ -158,16 +161,45 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         synchronized (lock) {
             try {
                 RegistryEntry entry = getEntry(normalized, false);
-                if (entry == null) {
+                if (Objects.isNull(entry)) {
                     return false;
                 }
                 Value deleted = kvClient.delKV(Key.of(normalized)).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
-                if (deleted == null) {
+                if (Objects.isNull(deleted)) {
                     return false;
                 }
                 destroyStream(entry.streamId());
                 waiters.notifyClosed(normalized);
                 return true;
+            } catch (Exception e) {
+                throw wrap(e);
+            }
+        }
+    }
+
+    @Override
+    public long trim(String name, long newStartOffset) throws StreamServiceException {
+        String normalized = normalize(name);
+        Object lock = nameLocks.computeIfAbsent(normalized, n -> new Object());
+        synchronized (lock) {
+            try {
+                RegistryEntry entry = getEntry(normalized, false);
+                if (Objects.isNull(entry)) {
+                    throw new StreamServiceException(StreamServiceException.Kind.NOT_FOUND);
+                }
+                Stream stream = ensureOpen(entry.streamId());
+                List<StreamMetadata> metas = metadataNode.client().readIndex(() ->
+                    metadataNode.stateMachine().streamControlManager().getStreams(List.of(entry.streamId())))
+                    .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+                long committedEnd = metas.isEmpty() ? 0 : metas.get(0).endOffset();
+                long lower = Math.max(stream.startOffset(), 0);
+                long clamped = Math.min(Math.max(newStartOffset, lower), Math.min(stream.confirmOffset(), committedEnd));
+                if (clamped > lower) {
+                    stream.trim(clamped).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+                }
+                return Math.max(stream.startOffset(), 0);
+            } catch (StreamServiceException e) {
+                throw e;
             } catch (Exception e) {
                 throw wrap(e);
             }
@@ -181,38 +213,35 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         synchronized (lock) {
             try {
                 RegistryEntry entry = getEntry(name, false);
-                if (entry == null) {
+                if (Objects.isNull(entry)) {
                     throw new StreamServiceException(StreamServiceException.Kind.NOT_FOUND);
                 }
                 Stream stream = ensureOpen(entry.streamId());
                 OffsetToken next = OffsetToken.ofRecordOffset(stream.nextOffset());
-
                 ProducerDecision producer = validateProducer(entry, command);
-                if (producer != null && producer.status() != ProducerDecision.Status.ACCEPTED) {
+                if (Objects.nonNull(producer) && producer.status() != ProducerDecision.Status.ACCEPTED) {
                     return handleProducerReject(entry, next, producer, command);
                 }
-
                 byte[] body = command.concatenatedPayload();
                 if (entry.closed()) {
                     if (command.closeAfter() && body.length == 0) {
-                        if (producer != null && !matchesClosedBy(entry, command) && entry.closedBy() != null) {
+                        if (Objects.nonNull(producer) && !matchesClosedBy(entry, command) && Objects.nonNull(entry.closedBy())) {
                             throw new StreamServiceException(StreamServiceException.Kind.CLOSED, next, true);
                         }
                         Long echoedSeq = command.hasProducer()
-                            ? (entry.closedBy() != null ? entry.closedBy().seq() : command.producer().seq())
+                            ? (Objects.nonNull(entry.closedBy()) ? entry.closedBy().seq() : command.producer().seq())
                             : null;
                         Long echoedEpoch = command.hasProducer() ? command.producer().epoch() : null;
                         return new AppendResult(next, false, true, echoedEpoch, echoedSeq);
                     }
-                    if (producer != null && matchesClosedBy(entry, command)) {
+                    if (Objects.nonNull(producer) && matchesClosedBy(entry, command)) {
                         return new AppendResult(next, false, true, command.producer().epoch(), entry.closedBy().seq());
                     }
                     throw new StreamServiceException(StreamServiceException.Kind.CLOSED, next, true);
                 }
-
                 boolean closeOnly = body.length == 0 && command.closeAfter();
                 if (!closeOnly) {
-                    if (command.contentType() == null || command.contentType().isEmpty()) {
+                    if (Objects.isNull(command.contentType()) || command.contentType().isEmpty()) {
                         throw new StreamServiceException(
                             StreamServiceException.Kind.BAD_REQUEST, next, false, "missing Content-Type");
                     }
@@ -224,27 +253,28 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                             StreamServiceException.Kind.BAD_REQUEST, next, false, "Empty body");
                     }
                 }
-
-                if (command.streamSeq() != null
-                    && (producer == null || producer.status() == ProducerDecision.Status.ACCEPTED)) {
-                    if (entry.lastSeq() != null && command.streamSeq().compareTo(entry.lastSeq()) <= 0) {
+                if (Objects.nonNull(command.streamSeq())
+                    && (Objects.isNull(producer) || producer.status() == ProducerDecision.Status.ACCEPTED)) {
+                    if (Objects.nonNull(entry.lastSeq()) && command.streamSeq().compareTo(entry.lastSeq()) <= 0) {
                         throw new StreamServiceException(
                             StreamServiceException.Kind.CONFLICT, next, false, "Sequence conflict");
                     }
                 }
-
                 if (!closeOnly) {
                     List<byte[]> messages = expandPayloads(entry.contentType(), command.payloads());
-                    for (byte[] message : messages) {
-                        next = appendBytes(name, stream, message);
+                    if (command.atomic() && messages.size() > 1) {
+                        next = appendFramedBatch(name, stream, messages);
+                    } else {
+                        for (byte[] message : messages) {
+                            next = appendBytes(name, stream, message);
+                        }
                     }
                 }
-
                 RegistryEntry updated = entry;
-                if (command.streamSeq() != null) {
+                if (Objects.nonNull(command.streamSeq())) {
                     updated = updated.withLastSeq(command.streamSeq());
                 }
-                if (producer != null && producer.status() == ProducerDecision.Status.ACCEPTED) {
+                if (Objects.nonNull(producer) && producer.status() == ProducerDecision.Status.ACCEPTED) {
                     Producer ctx = command.producer();
                     updated = updated.withProducer(ctx.producerId(), ctx.epoch(), ctx.seq());
                 }
@@ -257,7 +287,9 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                     updated = updated.close(closedBy);
                 }
                 updated = touchDeadline(updated);
-                putEntry(name, updated);
+                if (updated != entry) {
+                    putEntry(name, updated);
+                }
                 if (command.closeAfter()) {
                     waiters.notifyClosed(name);
                 }
@@ -279,7 +311,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         synchronized (lock) {
             try {
                 RegistryEntry entry = getEntry(name, true);
-                if (entry == null) {
+                if (Objects.isNull(entry)) {
                     throw new StreamServiceException(StreamServiceException.Kind.NOT_FOUND);
                 }
                 Stream stream = ensureOpen(entry.streamId());
@@ -299,10 +331,31 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                     List<StreamRecord> records = new ArrayList<>();
                     int total = 0;
                     long next = start;
+                    outer:
                     for (RecordBatchWithContext batch : fetch.recordBatchList()) {
                         ByteBuffer payload = batch.rawPayload();
                         byte[] bytes = new byte[payload.remaining()];
                         payload.get(bytes);
+                        if (batch.count() > 1) {
+                            List<byte[]> frames = BatchFraming.decode(bytes, batch.count());
+                            for (int i = 0; i < frames.size(); i++) {
+                                long offset = batch.baseOffset() + i;
+                                if (offset < start) {
+                                    continue;
+                                }
+                                byte[] frame = frames.get(i);
+                                if (total + frame.length > maxBytes && total > 0) {
+                                    break outer;
+                                }
+                                records.add(new StreamRecord(OffsetToken.ofRecordOffset(offset), frame));
+                                total += frame.length;
+                                next = offset + 1;
+                                if (total >= maxBytes || records.size() >= maxRecords) {
+                                    break outer;
+                                }
+                            }
+                            continue;
+                        }
                         if (total + bytes.length > maxBytes && total > 0) {
                             break;
                         }
@@ -331,7 +384,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         try {
             String normalized = normalize(name);
             RegistryEntry entry = getEntry(normalized, false);
-            if (entry == null) {
+            if (Objects.isNull(entry)) {
                 return false;
             }
             if (entry.closed()) {
@@ -360,7 +413,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
     public OptionalLong lookupStreamId(String name) throws Exception {
         RegistryEntry entry = getEntry(normalize(name), false);
-        return entry == null ? OptionalLong.empty() : OptionalLong.of(entry.streamId());
+        return Objects.isNull(entry) ? OptionalLong.empty() : OptionalLong.of(entry.streamId());
     }
 
     public Optional<Integer> ownerNodeId(long streamId) throws Exception {
@@ -412,7 +465,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         ProducerState state = entry.producers().get(ctx.producerId());
         long epoch = ctx.epoch();
         long seq = ctx.seq();
-        if (state == null) {
+        if (Objects.isNull(state)) {
             if (seq != 0L) {
                 return ProducerDecision.invalidEpochSeq();
             }
@@ -438,7 +491,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
     private static boolean matchesClosedBy(RegistryEntry entry, AppendCommand command) {
         ClosedBy closedBy = entry.closedBy();
-        return closedBy != null
+        return Objects.nonNull(closedBy)
             && command.hasProducer()
             && closedBy.producerId().equals(command.producer().producerId())
             && closedBy.epoch() == command.producer().epoch()
@@ -450,6 +503,16 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             new DefaultRecordBatch(1, System.currentTimeMillis(), Map.of(), ByteBuffer.wrap(bytes)))
             .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
         long next = Math.max(result.baseOffset() + 1, stream.nextOffset());
+        waiters.notifyAppend(name, next);
+        return OffsetToken.ofRecordOffset(next);
+    }
+
+    private OffsetToken appendFramedBatch(String name, Stream stream, List<byte[]> records) throws Exception {
+        byte[] framed = BatchFraming.encode(records);
+        io.streamstack.api.AppendResult result = stream.append(
+            new DefaultRecordBatch(records.size(), System.currentTimeMillis(), Map.of(), ByteBuffer.wrap(framed)))
+            .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+        long next = Math.max(result.baseOffset() + records.size(), stream.nextOffset());
         waiters.notifyAppend(name, next);
         return OffsetToken.ofRecordOffset(next);
     }
@@ -500,12 +563,12 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
     private Stream ensureOpen(long streamId) throws Exception {
         Stream existing = openStreams.get(streamId);
-        if (existing != null) {
+        if (Objects.nonNull(existing)) {
             return existing;
         }
         synchronized (this) {
             existing = openStreams.get(streamId);
-            if (existing != null) {
+            if (Objects.nonNull(existing)) {
                 return existing;
             }
             long epoch = nextEpoch(streamId);
@@ -519,7 +582,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
     private long nextEpoch(long streamId) throws Exception {
         AtomicLong local = localEpochs.get(streamId);
-        if (local != null) {
+        if (Objects.nonNull(local)) {
             return local.incrementAndGet();
         }
         List<StreamMetadata> streams = metadataNode.client().readIndex(() ->
@@ -531,7 +594,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
     private RegistryEntry getEntry(String name, boolean touch) throws Exception {
         Value value = kvClient.getKV(Key.of(name)).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
-        if (value == null || value.isNull()) {
+        if (Objects.isNull(value) || value.isNull()) {
             return null;
         }
         RegistryEntry entry = RegistryEntry.decode(toBytes(value));
@@ -562,7 +625,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         Stream stream = openStreams.remove(streamId);
         localEpochs.remove(streamId);
         try {
-            if (stream == null) {
+            if (Objects.isNull(stream)) {
                 stream = streamClient.openStream(streamId,
                     OpenStreamOptions.builder().epoch(nextEpoch(streamId)).build())
                     .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
@@ -574,7 +637,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
     private RegistryEntry requireEntry(String name, boolean touch) throws Exception {
         RegistryEntry entry = getEntry(name, touch);
-        if (entry == null) {
+        if (Objects.isNull(entry)) {
             throw new IllegalStateException("missing registry entry for " + name);
         }
         return entry;
@@ -586,7 +649,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     }
 
     private static RegistryEntry touchDeadline(RegistryEntry entry) {
-        if (entry.ttlSeconds() == null || entry.expiresAt() != null) {
+        if (Objects.isNull(entry.ttlSeconds()) || Objects.nonNull(entry.expiresAt())) {
             return entry;
         }
         long now = System.currentTimeMillis();
@@ -599,10 +662,10 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     }
 
     private static long deadlineOf(Long ttlSeconds, Instant expiresAt) {
-        if (expiresAt != null) {
+        if (Objects.nonNull(expiresAt)) {
             return expiresAt.toEpochMilli();
         }
-        if (ttlSeconds != null) {
+        if (Objects.nonNull(ttlSeconds)) {
             return System.currentTimeMillis() + ttlSeconds * 1000L;
         }
         return 0L;
@@ -619,6 +682,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             entry.contentType(),
             entry.ttlSeconds(),
             entry.expiresAt(),
+            OffsetToken.ofRecordOffset(Math.max(stream.startOffset(), 0)),
             OffsetToken.ofRecordOffset(stream.nextOffset()),
             entry.closed(),
             ownerNodeId(entry.streamId()).orElse(null));
@@ -637,7 +701,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     }
 
     static String normalize(String name) {
-        if (name == null || name.isEmpty()) {
+        if (Objects.isNull(name) || name.isEmpty()) {
             return "/";
         }
         return name;
@@ -673,23 +737,18 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         long expectedSeq,
         long receivedSeq) {
         enum Status { ACCEPTED, DUPLICATE, STALE_EPOCH, INVALID_EPOCH_SEQ, SEQUENCE_GAP }
-
         static ProducerDecision accepted(long epoch, long seq) {
             return new ProducerDecision(Status.ACCEPTED, seq, epoch, 0, 0);
         }
-
         static ProducerDecision duplicate(long lastSeq) {
             return new ProducerDecision(Status.DUPLICATE, lastSeq, 0, 0, 0);
         }
-
         static ProducerDecision stale(long currentEpoch) {
             return new ProducerDecision(Status.STALE_EPOCH, 0, currentEpoch, 0, 0);
         }
-
         static ProducerDecision invalidEpochSeq() {
             return new ProducerDecision(Status.INVALID_EPOCH_SEQ, 0, 0, 0, 0);
         }
-
         static ProducerDecision gap(long expected, long received) {
             return new ProducerDecision(Status.SEQUENCE_GAP, 0, 0, expected, received);
         }
@@ -705,37 +764,31 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         String lastSeq,
         Map<String, ProducerState> producers,
         ClosedBy closedBy) {
-
         RegistryEntry {
-            producers = producers == null ? Map.of() : Map.copyOf(producers);
+            producers = Objects.isNull(producers) ? Map.of() : Map.copyOf(producers);
         }
-
         RegistryEntry close(ClosedBy by) {
             return new RegistryEntry(streamId, contentType, ttlSeconds, expiresAt, true, deadlineMs, lastSeq,
-                producers, by != null ? by : closedBy);
+                producers, Objects.nonNull(by) ? by : closedBy);
         }
-
         RegistryEntry withLastSeq(String seq) {
             return new RegistryEntry(streamId, contentType, ttlSeconds, expiresAt, closed, deadlineMs, seq,
                 producers, closedBy);
         }
-
         RegistryEntry withDeadline(long deadline) {
             return new RegistryEntry(streamId, contentType, ttlSeconds, expiresAt, closed, deadline, lastSeq,
                 producers, closedBy);
         }
-
         RegistryEntry withProducer(String id, long epoch, long seq) {
             Map<String, ProducerState> next = new LinkedHashMap<>(producers);
             next.put(id, new ProducerState(epoch, seq));
             return new RegistryEntry(streamId, contentType, ttlSeconds, expiresAt, closed, deadlineMs, lastSeq,
                 next, closedBy);
         }
-
         byte[] encode() {
             byte[] ct = contentType.getBytes(StandardCharsets.UTF_8);
-            byte[] seqBytes = lastSeq == null ? new byte[0] : lastSeq.getBytes(StandardCharsets.UTF_8);
-            byte[] closedById = closedBy == null ? new byte[0]
+            byte[] seqBytes = Objects.isNull(lastSeq) ? new byte[0] : lastSeq.getBytes(StandardCharsets.UTF_8);
+            byte[] closedById = Objects.isNull(closedBy) ? new byte[0]
                 : closedBy.producerId().getBytes(StandardCharsets.UTF_8);
             int producersSize = 4;
             for (Map.Entry<String, ProducerState> e : producers.entrySet()) {
@@ -743,21 +796,21 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             }
             ByteBuffer buf = ByteBuffer.allocate(
                 1 + 8 + 4 + ct.length + 1 + 8 + 1 + 8 + 1 + 8 + 4 + seqBytes.length + 1 + 4 + closedById.length
-                    + (closedBy == null ? 0 : 16) + producersSize);
+                    + (Objects.isNull(closedBy) ? 0 : 16) + producersSize);
             buf.put((byte) 1);
             buf.putLong(streamId);
             buf.putInt(ct.length);
             buf.put(ct);
-            buf.put((byte) (ttlSeconds != null ? 1 : 0));
-            buf.putLong(ttlSeconds != null ? ttlSeconds : 0L);
-            buf.put((byte) (expiresAt != null ? 1 : 0));
-            buf.putLong(expiresAt != null ? expiresAt.toEpochMilli() : 0L);
+            buf.put((byte) (Objects.nonNull(ttlSeconds) ? 1 : 0));
+            buf.putLong(Objects.nonNull(ttlSeconds) ? ttlSeconds : 0L);
+            buf.put((byte) (Objects.nonNull(expiresAt) ? 1 : 0));
+            buf.putLong(Objects.nonNull(expiresAt) ? expiresAt.toEpochMilli() : 0L);
             buf.put((byte) (closed ? 1 : 0));
             buf.putLong(deadlineMs);
             buf.putInt(seqBytes.length);
             buf.put(seqBytes);
-            buf.put((byte) (closedBy != null ? 1 : 0));
-            if (closedBy != null) {
+            buf.put((byte) (Objects.nonNull(closedBy) ? 1 : 0));
+            if (Objects.nonNull(closedBy)) {
                 buf.putInt(closedById.length);
                 buf.put(closedById);
                 buf.putLong(closedBy.epoch());
@@ -773,7 +826,6 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             }
             return trim(buf);
         }
-
         static RegistryEntry decode(byte[] bytes) {
             ByteBuffer buf = ByteBuffer.wrap(bytes);
             byte version = buf.get();
@@ -816,7 +868,6 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             return new RegistryEntry(streamId, new String(ct, StandardCharsets.UTF_8), ttl, expiresAt, closed,
                 deadlineMs, lastSeq, producers, closedBy);
         }
-
         private static byte[] trim(ByteBuffer buf) {
             byte[] out = new byte[buf.position()];
             buf.flip();

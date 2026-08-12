@@ -44,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class DurableStreamsHandlerTest {
+
     @Test
     void createAppendReadCloseMatrix() throws Exception {
         InMemoryServices mem = new InMemoryServices();
@@ -57,45 +58,44 @@ public class DurableStreamsHandlerTest {
         try {
             String base = "http://127.0.0.1:" + app.port() + "/streams/demo";
             HttpClient client = HttpClient.newHttpClient();
-
             HttpResponse<String> created = client.send(
                 HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
                     .PUT(HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(201, created.statusCode());
             assertTrue(created.headers().firstValue(Protocol.H_STREAM_NEXT_OFFSET).isPresent());
-
             HttpResponse<String> idempotent = client.send(
                 HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
                     .PUT(HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(200, idempotent.statusCode());
-
             HttpResponse<String> conflict = client.send(
                 HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "application/json")
                     .PUT(HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(409, conflict.statusCode());
-
             HttpResponse<String> appended = client.send(
                 HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
                     .POST(HttpRequest.BodyPublishers.ofString("hello")).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(204, appended.statusCode());
-
             HttpResponse<byte[]> read = client.send(
                 HttpRequest.newBuilder(URI.create(base + "?offset=-1")).GET().build(),
                 HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(200, read.statusCode());
             assertEquals("hello", new String(read.body(), StandardCharsets.UTF_8));
-
             HttpResponse<String> closed = client.send(
                 HttpRequest.newBuilder(URI.create(base)).header(Protocol.H_STREAM_CLOSED, "true")
                     .POST(HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(204, closed.statusCode());
             assertEquals("true", closed.headers().firstValue(Protocol.H_STREAM_CLOSED).orElse(""));
-
+            HttpResponse<String> closedAgain = client.send(
+                HttpRequest.newBuilder(URI.create(base)).header(Protocol.H_STREAM_CLOSED, "true")
+                    .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                HttpResponse.BodyHandlers.ofString());
+            assertEquals(204, closedAgain.statusCode());
+            assertEquals("true", closedAgain.headers().firstValue(Protocol.H_STREAM_CLOSED).orElse(""));
             HttpResponse<String> rejected = client.send(
                 HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
                     .POST(HttpRequest.BodyPublishers.ofString("x")).build(),
@@ -120,12 +120,10 @@ public class DurableStreamsHandlerTest {
         try {
             String base = "http://127.0.0.1:" + app.port() + "/streams/closed";
             HttpClient client = HttpClient.newHttpClient();
-
             client.send(HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
                 .PUT(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
             client.send(HttpRequest.newBuilder(URI.create(base)).header(Protocol.H_STREAM_CLOSED, "true")
                 .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
-
             long start = System.nanoTime();
             HttpResponse<String> resp = client.send(
                 HttpRequest.newBuilder(URI.create(base + "?offset=0&live=long-poll")).GET().build(),
@@ -154,7 +152,6 @@ public class DurableStreamsHandlerTest {
             HttpClient client = HttpClient.newHttpClient();
             client.send(HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
                 .PUT(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
-
             HttpResponse<String> first = client.send(
                 HttpRequest.newBuilder(URI.create(base))
                     .header("Content-Type", "text/plain")
@@ -165,7 +162,6 @@ public class DurableStreamsHandlerTest {
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(200, first.statusCode());
             assertEquals("0", first.headers().firstValue(Protocol.H_PRODUCER_SEQ).orElse(""));
-
             HttpResponse<String> dup = client.send(
                 HttpRequest.newBuilder(URI.create(base))
                     .header("Content-Type", "text/plain")
@@ -186,15 +182,13 @@ public class DurableStreamsHandlerTest {
         private final ConcurrentHashMap<String, Entry> streams = new ConcurrentHashMap<>();
         private final StreamWaiterRegistry waiters = new StreamWaiterRegistry();
         private final AtomicLong ids = new AtomicLong();
-
         StreamService service() {
             return new StreamService(this, this, this, this);
         }
-
         @Override
         public CreateResult create(CreateCommand command) throws StreamServiceException {
             Entry existing = streams.get(command.name());
-            if (existing != null) {
+            if (Objects.nonNull(existing)) {
                 if (!existing.matches(command.contentType(), command.ttlSeconds(),
                     command.expiresAt(), command.closed())) {
                     throw new StreamServiceException(StreamServiceException.Kind.CONFLICT);
@@ -206,27 +200,33 @@ public class DurableStreamsHandlerTest {
             streams.put(command.name(), created);
             return new CreateResult(true, created.meta());
         }
-
         @Override
         public Optional<StreamMeta> head(String name) {
             Entry entry = streams.get(name);
-            return entry == null ? Optional.empty() : Optional.of(entry.meta());
+            return Objects.isNull(entry) ? Optional.empty() : Optional.of(entry.meta());
         }
-
         @Override
         public CloseResult close(String name) throws StreamServiceException {
             return new CloseResult(append(new AppendCommand(name, List.of(), null, null, null, true)).nextOffset());
         }
-
         @Override
         public boolean delete(String name) {
             Entry removed = streams.remove(name);
-            if (removed != null) {
+            if (Objects.nonNull(removed)) {
                 waiters.notifyClosed(removed.name);
             }
-            return removed != null;
+            return Objects.nonNull(removed);
         }
-
+        @Override
+        public long trim(String name, long newStartOffset) throws StreamServiceException {
+            Entry entry = require(name);
+            long clamped = Math.min(Math.max(newStartOffset, entry.startOffset), entry.nextOffset);
+            for (long offset = entry.startOffset; offset < clamped; offset++) {
+                entry.chunks.remove(offset);
+            }
+            entry.startOffset = clamped;
+            return entry.startOffset;
+        }
         @Override
         public AppendResult append(AppendCommand command) throws StreamServiceException {
             Entry entry = require(command.name());
@@ -235,7 +235,7 @@ public class DurableStreamsHandlerTest {
                 ProducerState state = entry.producers.get(command.producer().producerId());
                 long epoch = command.producer().epoch();
                 long seq = command.producer().seq();
-                if (state == null) {
+                if (Objects.isNull(state)) {
                     if (seq != 0L) {
                         throw new StreamServiceException(StreamServiceException.Kind.BAD_REQUEST, next, false,
                             "New epoch must start with sequence 0");
@@ -264,13 +264,13 @@ public class DurableStreamsHandlerTest {
             }
             boolean closeOnly = body.length == 0 && command.closeAfter();
             if (!closeOnly) {
-                if (command.contentType() == null || !entry.contentType.equals(command.contentType())) {
+                if (Objects.isNull(command.contentType()) || !entry.contentType.equals(command.contentType())) {
                     throw new StreamServiceException(StreamServiceException.Kind.CONFLICT, next, false);
                 }
                 if (body.length == 0) {
                     throw new StreamServiceException(StreamServiceException.Kind.BAD_REQUEST);
                 }
-                if (command.streamSeq() != null && entry.lastSeq != null
+                if (Objects.nonNull(command.streamSeq()) && Objects.nonNull(entry.lastSeq)
                     && command.streamSeq().compareTo(entry.lastSeq) <= 0) {
                     throw new StreamServiceException(
                         StreamServiceException.Kind.CONFLICT, next, false, "Sequence conflict");
@@ -279,7 +279,7 @@ public class DurableStreamsHandlerTest {
                 entry.nextOffset += 1;
                 waiters.notifyAppend(entry.name, entry.nextOffset);
                 next = OffsetToken.ofRecordOffset(entry.nextOffset);
-                if (command.streamSeq() != null) {
+                if (Objects.nonNull(command.streamSeq())) {
                     entry.lastSeq = command.streamSeq();
                 }
             }
@@ -295,7 +295,6 @@ public class DurableStreamsHandlerTest {
                 command.hasProducer() ? command.producer().epoch() : null,
                 command.hasProducer() ? command.producer().seq() : null);
         }
-
         @Override
         public ReadResult read(String name, OffsetToken from, int maxBytes, int maxRecords)
             throws StreamServiceException {
@@ -317,7 +316,6 @@ public class DurableStreamsHandlerTest {
                 next >= entry.nextOffset,
                 entry.closed);
         }
-
         @Override
         public boolean await(String name, OffsetToken from, Duration timeout) throws StreamServiceException {
             try {
@@ -332,7 +330,6 @@ public class DurableStreamsHandlerTest {
                 throw new StreamServiceException(StreamServiceException.Kind.BAD_REQUEST, null, false, e.getMessage());
             }
         }
-
         @Override
         public CompletableFuture<Boolean> whenAppended(String name, OffsetToken from, Duration timeout) {
             return CompletableFuture.supplyAsync(() -> {
@@ -343,36 +340,30 @@ public class DurableStreamsHandlerTest {
                 }
             });
         }
-
         @Override
         public Owner ownerOf(String name) {
             Entry entry = streams.get(name);
-            return Owner.local(entry == null ? OptionalLong.empty() : OptionalLong.of(entry.streamId));
+            return Owner.local(Objects.isNull(entry) ? OptionalLong.empty() : OptionalLong.of(entry.streamId));
         }
-
         @Override
         public NodeMeta localNode() {
             return new NodeMeta(1, "http://127.0.0.1:0");
         }
-
         private Entry require(String name) throws StreamServiceException {
             Entry entry = streams.get(name);
-            if (entry == null) {
+            if (Objects.isNull(entry)) {
                 throw new StreamServiceException(StreamServiceException.Kind.NOT_FOUND);
             }
             return entry;
         }
-
         static final class ProducerState {
             final long epoch;
             final long lastSeq;
-
             ProducerState(long epoch, long lastSeq) {
                 this.epoch = epoch;
                 this.lastSeq = lastSeq;
             }
         }
-
         static final class Entry {
             final String name;
             final long streamId;
@@ -381,10 +372,10 @@ public class DurableStreamsHandlerTest {
             final Instant expiresAt;
             final LinkedHashMap<Long, byte[]> chunks = new LinkedHashMap<>();
             final Map<String, ProducerState> producers = new LinkedHashMap<>();
+            long startOffset;
             long nextOffset;
             boolean closed;
             String lastSeq;
-
             Entry(String name, long streamId, String contentType, Long ttlSeconds, Instant expiresAt, boolean closed) {
                 this.name = name;
                 this.streamId = streamId;
@@ -393,17 +384,15 @@ public class DurableStreamsHandlerTest {
                 this.expiresAt = expiresAt;
                 this.closed = closed;
             }
-
             boolean matches(String contentType, Long ttlSeconds, Instant expiresAt, boolean closed) {
                 return this.contentType.equals(contentType)
                     && Objects.equals(this.ttlSeconds, ttlSeconds)
                     && Objects.equals(this.expiresAt, expiresAt)
                     && this.closed == closed;
             }
-
             StreamMeta meta() {
                 return new StreamMeta(name, streamId, contentType, ttlSeconds, expiresAt,
-                    OffsetToken.ofRecordOffset(nextOffset), closed, 1);
+                    OffsetToken.ofRecordOffset(startOffset), OffsetToken.ofRecordOffset(nextOffset), closed, 1);
             }
         }
     }

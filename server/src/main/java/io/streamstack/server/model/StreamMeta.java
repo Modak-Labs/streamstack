@@ -8,6 +8,7 @@ public record StreamMeta(
     String contentType,
     Long ttlSeconds,
     Instant expiresAt,
+    OffsetToken startOffset,
     OffsetToken nextOffset,
     boolean closed,
     Integer ownerNodeId) {

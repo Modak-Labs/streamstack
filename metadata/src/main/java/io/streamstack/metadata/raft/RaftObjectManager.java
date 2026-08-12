@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import io.streamstack.metadata.model.MetadataCommand;
 import io.streamstack.s3.metadata.S3ObjectMetadata;
 import io.streamstack.s3.objects.CommitStreamSetObjectHook;
@@ -12,8 +14,10 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public final class RaftObjectManager implements ObjectManager {
+
     private final MetadataNode metadataNode;
     private final MetadataClient client;
+
     private CommitStreamSetObjectHook commitStreamSetObjectHook =
         request -> CompletableFuture.completedFuture(null);
 
@@ -79,6 +83,6 @@ public final class RaftObjectManager implements ObjectManager {
     @Override
     public void setCommitStreamSetObjectHook(CommitStreamSetObjectHook hook) {
         this.commitStreamSetObjectHook =
-            hook == null ? request -> CompletableFuture.completedFuture(null) : hook;
+            Objects.isNull(hook) ? request -> CompletableFuture.completedFuture(null) : hook;
     }
 }

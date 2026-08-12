@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class StreamStackServerIntegrationTest {
+
     @TempDir
     Path tempDir;
 
@@ -39,12 +40,10 @@ public class StreamStackServerIntegrationTest {
             .routingMode(RoutingMode.LOCAL_ALWAYS)
             .longPollTimeoutSec(1)
             .build();
-
         try (DurableStreamsServer server = new DurableStreamsServer(config)) {
             server.start();
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             String base = server.baseUrl() + "/streams/demo";
-
             HttpResponse<String> create = client.send(
                 HttpRequest.newBuilder(URI.create(base))
                     .header("Content-Type", "text/plain")
@@ -52,7 +51,6 @@ public class StreamStackServerIntegrationTest {
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(201, create.statusCode(), create.body());
-
             HttpResponse<String> append = client.send(
                 HttpRequest.newBuilder(URI.create(base))
                     .header("Content-Type", "text/plain")
@@ -61,13 +59,11 @@ public class StreamStackServerIntegrationTest {
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(204, append.statusCode());
             assertTrue(append.headers().firstValue("Stream-Next-Offset").isPresent());
-
             HttpResponse<byte[]> read = client.send(
                 HttpRequest.newBuilder(URI.create(base + "?offset=-1")).GET().build(),
                 HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(200, read.statusCode());
             assertEquals("hello-world", new String(read.body(), StandardCharsets.UTF_8));
-
             HttpResponse<String> close = client.send(
                 HttpRequest.newBuilder(URI.create(base))
                     .header("Stream-Closed", "true")
@@ -75,7 +71,6 @@ public class StreamStackServerIntegrationTest {
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(204, close.statusCode());
-
             HttpResponse<String> rejected = client.send(
                 HttpRequest.newBuilder(URI.create(base))
                     .header("Content-Type", "text/plain")

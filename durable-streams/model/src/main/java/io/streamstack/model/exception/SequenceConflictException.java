@@ -1,9 +1,7 @@
 package io.streamstack.model.exception;
 
-/**
- * Producer or Stream-Seq conflict (HTTP 409).
- */
 public final class SequenceConflictException extends DurableStreamException {
+
     private final Long expectedSeq;
     private final Long receivedSeq;
 

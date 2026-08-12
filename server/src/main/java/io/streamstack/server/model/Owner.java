@@ -1,5 +1,6 @@
 package io.streamstack.server.model;
 
+import java.util.Objects;
 import java.util.OptionalLong;
 
 public record Owner(
@@ -9,7 +10,7 @@ public record Owner(
     String ownerAdvertisedAddress) {
 
     public Owner {
-        streamId = streamId == null ? OptionalLong.empty() : streamId;
+        streamId = Objects.isNull(streamId) ? OptionalLong.empty() : streamId;
     }
 
     public static Owner local(OptionalLong streamId) {

@@ -1,8 +1,11 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import com.alipay.sofa.jraft.entity.PeerId;
 
 public final class MetadataHealth {
+
     private final MetadataNode node;
 
     public MetadataHealth(MetadataNode node) {
@@ -15,7 +18,7 @@ public final class MetadataHealth {
 
     public String leaderId() {
         PeerId leader = node.leaderId();
-        return leader == null ? null : leader.toString();
+        return Objects.isNull(leader) ? null : leader.toString();
     }
 
     public int nodeId() {

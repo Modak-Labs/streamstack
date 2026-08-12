@@ -8,11 +8,10 @@ import io.streamstack.server.model.StreamMeta;
 import java.util.Optional;
 
 public interface StreamLifecycleService {
+
     CreateResult create(CreateCommand command) throws StreamServiceException;
-
     Optional<StreamMeta> head(String name) throws StreamServiceException;
-
     CloseResult close(String name) throws StreamServiceException;
-
     boolean delete(String name) throws StreamServiceException;
+    long trim(String name, long newStartOffset) throws StreamServiceException;
 }

@@ -1,9 +1,7 @@
 package io.streamstack.model.exception;
 
-/**
- * Stream does not exist (HTTP 404).
- */
 public final class StreamNotFoundException extends DurableStreamException {
+
     private final String url;
 
     public StreamNotFoundException(String url) {

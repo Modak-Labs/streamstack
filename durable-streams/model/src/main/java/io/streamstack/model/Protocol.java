@@ -1,19 +1,15 @@
 package io.streamstack.model;
 
-/**
- * Durable Streams HTTP header, query, and constant names.
- */
 public final class Protocol {
+
     private Protocol() {
     }
 
     public static final String Q_OFFSET = "offset";
     public static final String Q_LIVE = "live";
     public static final String Q_CURSOR = "cursor";
-
     public static final String LIVE_LONG_POLL = "long-poll";
     public static final String LIVE_SSE = "sse";
-
     public static final String H_STREAM_NEXT_OFFSET = "Stream-Next-Offset";
     public static final String H_STREAM_UP_TO_DATE = "Stream-Up-To-Date";
     public static final String H_STREAM_TTL = "Stream-TTL";
@@ -32,7 +28,6 @@ public final class Protocol {
     public static final String H_LOCATION = "Location";
     public static final String H_ETAG = "ETag";
     public static final String H_IF_NONE_MATCH = "If-None-Match";
-
     public static final String CT_EVENT_STREAM = "text/event-stream";
     public static final String BOOL_TRUE = "true";
     public static final String CACHE_CATCH_UP = "public, max-age=60, stale-while-revalidate=300";

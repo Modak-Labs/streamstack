@@ -4,6 +4,7 @@ import io.streamstack.api.exceptions.ErrorCode;
 import io.streamstack.api.exceptions.StreamClientException;
 
 public final class MetadataException extends RuntimeException {
+
     public static final int STREAM_NOT_EXIST = 1;
     public static final int STREAM_NOT_CLOSED = 2;
     public static final int STREAM_FENCED = 3;
@@ -11,7 +12,6 @@ public final class MetadataException extends RuntimeException {
     public static final int NODE_EPOCH_MISMATCH = 5;
     public static final int REDUNDANT_OPERATION = 6;
     public static final int UNEXPECTED = 99;
-
     private final int code;
 
     public MetadataException(int code, String message) {

@@ -1,5 +1,7 @@
 package io.streamstack.server.ds;
 
+import java.util.Objects;
+
 import io.streamstack.model.Offset;
 import io.streamstack.model.request.AppendRequest;
 import io.streamstack.model.response.AppendResponse;
@@ -18,10 +20,8 @@ import io.streamstack.server.model.StreamMeta;
 import java.time.Instant;
 import java.util.List;
 
-/**
- * Maps Durable Streams wire types to/from core service model types.
- */
 public final class ProtocolConverter {
+
     private ProtocolConverter() {
     }
 
@@ -37,14 +37,14 @@ public final class ProtocolConverter {
 
     public static AppendCommand toAppendCommand(String name, AppendRequest request) {
         String streamSeq = request.streamSeq();
-        if (streamSeq != null && streamSeq.isEmpty()) {
+        if (Objects.nonNull(streamSeq) && streamSeq.isEmpty()) {
             streamSeq = null;
         }
         Producer producer = null;
-        if (request.producerId() != null) {
+        if (Objects.nonNull(request.producerId())) {
             producer = new Producer(request.producerId(), request.producerEpoch(), request.producerSeq());
         }
-        List<byte[]> payloads = request.body() == null || request.body().length == 0
+        List<byte[]> payloads = Objects.isNull(request.body()) || request.body().length == 0
             ? List.of()
             : List.of(request.body());
         return new AppendCommand(
@@ -93,11 +93,11 @@ public final class ProtocolConverter {
     }
 
     public static Offset toOffset(OffsetToken token) {
-        return token == null ? null : Offset.of(token.value());
+        return Objects.isNull(token) ? null : Offset.of(token.value());
     }
 
     public static OffsetToken toToken(Offset offset) {
-        if (offset == null) {
+        if (Objects.isNull(offset)) {
             return null;
         }
         if (offset.isBeginning()) {

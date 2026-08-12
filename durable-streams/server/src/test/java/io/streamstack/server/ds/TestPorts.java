@@ -3,6 +3,7 @@ package io.streamstack.server.ds;
 import java.net.ServerSocket;
 
 final class TestPorts {
+
     private TestPorts() {
     }
 

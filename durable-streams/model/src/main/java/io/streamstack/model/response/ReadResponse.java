@@ -1,5 +1,7 @@
 package io.streamstack.model.response;
 
+import java.util.Objects;
+
 import io.streamstack.model.Offset;
 
 import java.util.List;
@@ -12,7 +14,7 @@ public record ReadResponse(
     boolean closed) {
 
     public ReadResponse {
-        messages = messages == null ? List.of() : List.copyOf(messages);
+        messages = Objects.isNull(messages) ? List.of() : List.copyOf(messages);
     }
 
     public byte[] concatenated() {

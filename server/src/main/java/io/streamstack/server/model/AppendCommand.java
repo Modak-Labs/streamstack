@@ -9,18 +9,29 @@ public record AppendCommand(
     String contentType,
     String streamSeq,
     Producer producer,
-    boolean closeAfter) {
+    boolean closeAfter,
+    boolean atomic) {
 
     public AppendCommand {
         Objects.requireNonNull(name, "name");
-        payloads = payloads == null ? List.of() : List.copyOf(payloads);
-        if (streamSeq != null && streamSeq.isEmpty()) {
+        payloads = Objects.isNull(payloads) ? List.of() : List.copyOf(payloads);
+        if (Objects.nonNull(streamSeq) && streamSeq.isEmpty()) {
             streamSeq = null;
         }
     }
 
+    public AppendCommand(
+        String name,
+        List<byte[]> payloads,
+        String contentType,
+        String streamSeq,
+        Producer producer,
+        boolean closeAfter) {
+        this(name, payloads, contentType, streamSeq, producer, closeAfter, false);
+    }
+
     public boolean hasProducer() {
-        return producer != null;
+        return Objects.nonNull(producer);
     }
 
     public byte[] concatenatedPayload() {

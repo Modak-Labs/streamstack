@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class S3StorageRaftIntegrationTest {
+
     @TempDir
     Path tempDir;
 
@@ -40,17 +41,14 @@ public class S3StorageRaftIntegrationTest {
         List<String> peers = MetadataNode.singlePeer("127.0.0.1", port);
         ObjectStorage objectStorage = new LocalFileObjectStorage(
             BucketURI.parse("-2@file://" + objectDir.getAbsolutePath()));
-
         long streamId;
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 1L, objectStorage)) {
             node.awaitLeader(15, TimeUnit.SECONDS);
             awaitRegistered(node);
             RaftStreamManager streamManager = new RaftStreamManager(node);
             RaftObjectManager objectManager = new RaftObjectManager(node);
-
             streamId = streamManager.createStream().get(15, TimeUnit.SECONDS);
             streamManager.openStream(streamId, 1).get(15, TimeUnit.SECONDS);
-
             Config config = new Config();
             config.blockCacheSize(0);
             MemoryWriteAheadLog wal = new MemoryWriteAheadLog();
@@ -73,7 +71,6 @@ public class S3StorageRaftIntegrationTest {
                 storage.append(record(streamId, 1)).get(15, TimeUnit.SECONDS);
                 storage.append(record(streamId, 2)).get(15, TimeUnit.SECONDS);
                 storage.forceUpload(streamId).get(30, TimeUnit.SECONDS);
-
                 ReadDataBlock read = storage.read(streamId, 0, 3, 1024).get(15, TimeUnit.SECONDS);
                 assertEquals(3, read.getRecords().size());
                 assertEquals(3, streamManager.getStreams(List.of(streamId)).get(15, TimeUnit.SECONDS).get(0).endOffset());
@@ -83,7 +80,6 @@ public class S3StorageRaftIntegrationTest {
             }
             node.triggerSnapshot();
         }
-
         ObjectStorage restartedStorage = new LocalFileObjectStorage(
             BucketURI.parse("-2@file://" + objectDir.getAbsolutePath()));
         try (MetadataNode restarted = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 2L, restartedStorage)) {
@@ -91,11 +87,9 @@ public class S3StorageRaftIntegrationTest {
             awaitRegistered(restarted);
             RaftStreamManager streamManager = new RaftStreamManager(restarted);
             RaftObjectManager objectManager = new RaftObjectManager(restarted);
-
             StreamMetadata recovered = streamManager.getStreams(List.of(streamId)).get(15, TimeUnit.SECONDS).get(0);
             assertEquals(streamId, recovered.streamId());
             assertEquals(3, recovered.endOffset());
-
             Config config = new Config();
             config.blockCacheSize(0);
             MemoryWriteAheadLog wal = new MemoryWriteAheadLog();

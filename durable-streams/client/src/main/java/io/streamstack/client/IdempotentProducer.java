@@ -1,5 +1,7 @@
 package io.streamstack.client;
 
+import java.util.Objects;
+
 import io.streamstack.client.model.ProducerConfig;
 import io.streamstack.model.Protocol;
 import io.streamstack.model.exception.DurableStreamException;
@@ -33,29 +35,35 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class IdempotentProducer implements AutoCloseable {
+
     private final DurableStream client;
     private final String url;
     private final String producerId;
     private final ProducerConfig config;
-
     private final AtomicLong epoch;
     private final AtomicLong nextSeq;
+
     private final AtomicInteger inFlight = new AtomicInteger();
+
     private final AtomicBoolean closed = new AtomicBoolean();
+
     private final AtomicBoolean streamClosed = new AtomicBoolean();
 
     private final Object batchLock = new Object();
+
     private final Object epochLock = new Object();
 
     private List<byte[]> pendingBatch = new ArrayList<>(1024);
+
     private int batchBytes;
     private ScheduledFuture<?> lingerTimer;
-
     private final ScheduledExecutorService scheduler;
+
     private final ConcurrentLinkedQueue<CompletableFuture<Void>> inFlightFutures = new ConcurrentLinkedQueue<>();
+
     private final LinkedBlockingQueue<DurableStreamException> errors = new LinkedBlockingQueue<>();
-    private final ConcurrentHashMap<Long, ConcurrentHashMap<Long, CompletableFuture<Void>>> seqState =
-        new ConcurrentHashMap<>();
+
+    private final ConcurrentHashMap<Long, EpochSeqState> seqState = new ConcurrentHashMap<>();
 
     public IdempotentProducer(DurableStream client, String url, String producerId, ProducerConfig config) {
         this.client = client;
@@ -79,9 +87,9 @@ public final class IdempotentProducer implements AutoCloseable {
         synchronized (batchLock) {
             pendingBatch.add(bytes);
             batchBytes += bytes.length;
-            if (batchBytes >= config.maxBatchBytes()) {
+            if (batchBytes >= config.maxBatchBytes() || config.lingerMs() == 0) {
                 sendBatch();
-            } else if (lingerTimer == null && config.lingerMs() > 0) {
+            } else if (Objects.isNull(lingerTimer)) {
                 lingerTimer = scheduler.schedule(this::onLingerTimeout, config.lingerMs(), TimeUnit.MILLISECONDS);
             }
         }
@@ -92,7 +100,7 @@ public final class IdempotentProducer implements AutoCloseable {
             boolean hasPending;
             boolean hasInFlight;
             synchronized (batchLock) {
-                if (lingerTimer != null) {
+                if (Objects.nonNull(lingerTimer)) {
                     lingerTimer.cancel(false);
                     lingerTimer = null;
                 }
@@ -107,7 +115,7 @@ public final class IdempotentProducer implements AutoCloseable {
             }
             if (hasInFlight) {
                 CompletableFuture<Void> any = inFlightFutures.peek();
-                if (any != null) {
+                if (Objects.nonNull(any)) {
                     try {
                         any.get(100, TimeUnit.MILLISECONDS);
                     } catch (TimeoutException | CancellationException ignored) {
@@ -121,14 +129,14 @@ public final class IdempotentProducer implements AutoCloseable {
         }
         DurableStreamException first = null;
         DurableStreamException error;
-        while ((error = errors.poll()) != null) {
-            if (first == null) {
+        while (Objects.nonNull((error = errors.poll()))) {
+            if (Objects.isNull(first)) {
                 first = error;
             } else {
                 first.addSuppressed(error);
             }
         }
-        if (first != null) {
+        if (Objects.nonNull(first)) {
             throw first;
         }
     }
@@ -172,7 +180,7 @@ public final class IdempotentProducer implements AutoCloseable {
         } catch (DurableStreamException err) {
             signalSeqComplete(epochVal, seq, err);
             errors.offer(err);
-            if (config.onError() != null) {
+            if (Objects.nonNull(config.onError())) {
                 config.onError().accept(err);
             }
             throw err;
@@ -180,8 +188,10 @@ public final class IdempotentProducer implements AutoCloseable {
     }
 
     public void restart() {
-        epoch.incrementAndGet();
-        nextSeq.set(0);
+        synchronized (epochLock) {
+            epoch.incrementAndGet();
+            nextSeq.set(0);
+        }
     }
 
     public String producerId() {
@@ -209,7 +219,7 @@ public final class IdempotentProducer implements AutoCloseable {
         }
         cancelLingerTimer();
         if (inFlight.get() >= config.maxInFlight()) {
-            if (lingerTimer == null) {
+            if (Objects.isNull(lingerTimer)) {
                 lingerTimer = scheduler.schedule(this::onLingerTimeout, 1, TimeUnit.MILLISECONDS);
             }
             return;
@@ -229,7 +239,7 @@ public final class IdempotentProducer implements AutoCloseable {
         sendBatchWithRetry(batch, currentEpoch, seq, false).whenComplete((v, ex) -> {
             inFlight.decrementAndGet();
             inFlightFutures.remove(tracked);
-            if (ex != null) {
+            if (Objects.nonNull(ex)) {
                 tracked.completeExceptionally(ex);
             } else {
                 tracked.complete(null);
@@ -238,43 +248,84 @@ public final class IdempotentProducer implements AutoCloseable {
     }
 
     private void cancelLingerTimer() {
-        if (lingerTimer != null) {
+        if (Objects.nonNull(lingerTimer)) {
             lingerTimer.cancel(false);
             lingerTimer = null;
         }
     }
 
+    private EpochSeqState epochState(long epochVal) {
+        return seqState.computeIfAbsent(epochVal, k -> new EpochSeqState());
+    }
+
     private CompletableFuture<Void> getSeqFuture(long epochVal, long seq) {
-        return seqState.computeIfAbsent(epochVal, k -> new ConcurrentHashMap<>())
-            .computeIfAbsent(seq, k -> new CompletableFuture<>());
+        return epochState(epochVal).futures.computeIfAbsent(seq, k -> new CompletableFuture<>());
     }
 
     private void signalSeqComplete(long epochVal, long seq, Throwable error) {
-        ConcurrentHashMap<Long, CompletableFuture<Void>> epochMap = seqState.get(epochVal);
-        if (epochMap == null) {
-            return;
-        }
-        CompletableFuture<Void> future = epochMap.get(seq);
-        if (future != null) {
-            if (error != null) {
+        EpochSeqState state = epochState(epochVal);
+        CompletableFuture<Void> future = state.futures.get(seq);
+        if (Objects.nonNull(future)) {
+            if (Objects.nonNull(error)) {
                 future.completeExceptionally(error);
             } else {
                 future.complete(null);
             }
         }
+        state.highestCompleted.accumulateAndGet(seq, Math::max);
         long cleanupThreshold = seq - config.maxInFlight() * 3L;
         if (cleanupThreshold > 0) {
-            epochMap.keySet().removeIf(oldSeq -> oldSeq < cleanupThreshold);
+            state.futures.keySet().removeIf(oldSeq -> oldSeq < cleanupThreshold);
         }
     }
 
     private CompletableFuture<Void> waitForSeq(long epochVal, long seq) {
-        return getSeqFuture(epochVal, seq);
+        EpochSeqState state = epochState(epochVal);
+        CompletableFuture<Void> existing = state.futures.get(seq);
+        if (Objects.nonNull(existing)) {
+            return existing;
+        }
+        if (seq <= state.highestCompleted.get()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return state.futures.computeIfAbsent(seq, k -> new CompletableFuture<>());
+    }
+
+    private Claim claimEpoch(long serverEpoch) {
+        synchronized (epochLock) {
+            if (epoch.get() <= serverEpoch) {
+                epoch.set(serverEpoch + 1);
+                nextSeq.set(0);
+            }
+            return new Claim(epoch.get(), nextSeq.getAndIncrement());
+        }
+    }
+
+    private CompletableFuture<Void> awaitPredecessors(long epochVal, long fromSeq, long toSeq) {
+        List<CompletableFuture<Void>> wait = new ArrayList<>();
+        for (long s = fromSeq; s < toSeq; s++) {
+            wait.add(waitForSeq(epochVal, s));
+        }
+        return CompletableFuture.allOf(wait.toArray(CompletableFuture[]::new));
+    }
+
+    private void reportFailure(long epochVal, long seq, DurableStreamException err) {
+        signalSeqComplete(epochVal, seq, err);
+        errors.offer(err);
+        if (Objects.nonNull(config.onError())) {
+            config.onError().accept(err);
+        }
+    }
+
+    private CompletableFuture<Void> failBatch(long epochVal, long seq, DurableStreamException err) {
+        reportFailure(epochVal, seq, err);
+        return CompletableFuture.failedFuture(err);
     }
 
     private CompletableFuture<Void> sendBatchWithRetry(List<byte[]> batch, long batchEpoch, long seq, boolean isRetry) {
         getSeqFuture(batchEpoch, seq);
-        byte[] data = serializeBatch(batch);
+        String contentType = Objects.nonNull(config.contentType()) ? config.contentType() : client.cachedContentType(url);
+        byte[] data = serializeBatch(batch, contentType);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .POST(HttpRequest.BodyPublishers.ofByteArray(data))
@@ -282,8 +333,7 @@ public final class IdempotentProducer implements AutoCloseable {
             .header(Protocol.H_PRODUCER_ID, producerId)
             .header(Protocol.H_PRODUCER_EPOCH, Long.toString(batchEpoch))
             .header(Protocol.H_PRODUCER_SEQ, Long.toString(seq));
-        String contentType = config.contentType() != null ? config.contentType() : client.cachedContentType(url);
-        if (contentType != null) {
+        if (Objects.nonNull(contentType)) {
             builder.header(Protocol.H_CONTENT_TYPE, contentType);
         }
         client.resolveHeaders().forEach(builder::header);
@@ -296,63 +346,27 @@ public final class IdempotentProducer implements AutoCloseable {
             if (status == 403) {
                 long serverEpoch = parseEpoch(response);
                 if (config.autoClaim() && !isRetry) {
-                    long retrySeq;
-                    synchronized (epochLock) {
-                        if (epoch.get() <= serverEpoch) {
-                            epoch.set(serverEpoch + 1);
-                            nextSeq.set(0);
-                        }
-                        retrySeq = nextSeq.getAndIncrement();
-                    }
-                    return sendBatchWithRetry(batch, epoch.get(), retrySeq, true);
+                    Claim claim = claimEpoch(serverEpoch);
+                    return sendBatchWithRetry(batch, claim.epoch(), claim.seq(), true);
                 }
-                StaleEpochException err = new StaleEpochException(serverEpoch);
-                signalSeqComplete(batchEpoch, seq, err);
-                errors.offer(err);
-                if (config.onError() != null) {
-                    config.onError().accept(err);
-                }
-                return CompletableFuture.failedFuture(err);
+                return failBatch(batchEpoch, seq, new StaleEpochException(serverEpoch));
             }
             if (status == 409) {
-                long expectedSeq = response.headers()
-                    .firstValue(Protocol.H_PRODUCER_EXPECTED_SEQ)
-                    .map(Long::parseLong)
-                    .orElse(-1L);
+                long expectedSeq = expectedSeq(response);
                 if (expectedSeq >= 0 && expectedSeq < seq) {
-                    List<CompletableFuture<Void>> wait = new ArrayList<>();
-                    for (long s = expectedSeq; s < seq; s++) {
-                        wait.add(waitForSeq(batchEpoch, s));
-                    }
-                    return CompletableFuture.allOf(wait.toArray(CompletableFuture[]::new))
+                    return awaitPredecessors(batchEpoch, expectedSeq, seq)
                         .thenCompose(v -> sendBatchWithRetry(batch, batchEpoch, seq, false));
                 }
-                SequenceConflictException err = new SequenceConflictException(
-                    expectedSeq >= 0 ? expectedSeq : null,
-                    seq);
-                signalSeqComplete(batchEpoch, seq, err);
-                errors.offer(err);
-                if (config.onError() != null) {
-                    config.onError().accept(err);
-                }
-                return CompletableFuture.failedFuture(err);
+                return failBatch(batchEpoch, seq,
+                    new SequenceConflictException(expectedSeq >= 0 ? expectedSeq : null, seq));
             }
-            DurableStreamException err = new DurableStreamException("Batch failed with status: " + status, status);
-            signalSeqComplete(batchEpoch, seq, err);
-            errors.offer(err);
-            if (config.onError() != null) {
-                config.onError().accept(err);
-            }
-            return CompletableFuture.failedFuture(err);
+            return failBatch(batchEpoch, seq,
+                new DurableStreamException("Batch failed with status: " + status, status));
         }).exceptionally(ex -> {
-            Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-            DurableStreamException err = cause instanceof DurableStreamException dse
-                ? dse
-                : new DurableStreamException("Batch send failed: " + cause.getMessage(), cause);
-            signalSeqComplete(batchEpoch, seq, err);
-            errors.offer(err);
-            if (config.onError() != null) {
-                config.onError().accept(err);
+            Throwable cause = Objects.nonNull(ex.getCause()) ? ex.getCause() : ex;
+            if (!(cause instanceof DurableStreamException)) {
+                reportFailure(batchEpoch, seq,
+                    new DurableStreamException("Batch send failed: " + cause.getMessage(), cause));
             }
             return null;
         });
@@ -360,9 +374,9 @@ public final class IdempotentProducer implements AutoCloseable {
 
     private void sendCloseWithRetry(byte[] data, long batchEpoch, long seq, boolean isRetry) {
         byte[] body = null;
-        String contentType = config.contentType() != null ? config.contentType() : client.cachedContentType(url);
-        if (data != null && data.length > 0) {
-            boolean isJson = contentType != null && contentType.contains("json");
+        String contentType = Objects.nonNull(config.contentType()) ? config.contentType() : client.cachedContentType(url);
+        if (Objects.nonNull(data) && data.length > 0) {
+            boolean isJson = Objects.nonNull(contentType) && contentType.contains("json");
             body = isJson ? DurableStream.wrapInJsonArray(data) : data;
         }
         HttpRequest.Builder builder = HttpRequest.newBuilder()
@@ -372,11 +386,11 @@ public final class IdempotentProducer implements AutoCloseable {
             .header(Protocol.H_PRODUCER_EPOCH, Long.toString(batchEpoch))
             .header(Protocol.H_PRODUCER_SEQ, Long.toString(seq))
             .header(Protocol.H_STREAM_CLOSED, Protocol.BOOL_TRUE);
-        if (contentType != null && body != null) {
+        if (Objects.nonNull(contentType) && Objects.nonNull(body)) {
             builder.header(Protocol.H_CONTENT_TYPE, contentType);
         }
         client.resolveHeaders().forEach(builder::header);
-        if (body != null) {
+        if (Objects.nonNull(body)) {
             builder.POST(HttpRequest.BodyPublishers.ofByteArray(body));
         } else {
             builder.POST(HttpRequest.BodyPublishers.noBody());
@@ -397,15 +411,8 @@ public final class IdempotentProducer implements AutoCloseable {
         if (status == 403) {
             long serverEpoch = parseEpoch(response);
             if (config.autoClaim() && !isRetry) {
-                long retrySeq;
-                synchronized (epochLock) {
-                    if (epoch.get() <= serverEpoch) {
-                        epoch.set(serverEpoch + 1);
-                        nextSeq.set(0);
-                    }
-                    retrySeq = nextSeq.getAndIncrement();
-                }
-                sendCloseWithRetry(data, epoch.get(), retrySeq, true);
+                Claim claim = claimEpoch(serverEpoch);
+                sendCloseWithRetry(data, claim.epoch(), claim.seq(), true);
                 return;
             }
             throw new StaleEpochException(serverEpoch);
@@ -415,16 +422,9 @@ public final class IdempotentProducer implements AutoCloseable {
                 response.headers().firstValue(Protocol.H_STREAM_CLOSED).orElse(null))) {
                 throw new StreamClosedException(url);
             }
-            long expectedSeq = response.headers()
-                .firstValue(Protocol.H_PRODUCER_EXPECTED_SEQ)
-                .map(Long::parseLong)
-                .orElse(-1L);
+            long expectedSeq = expectedSeq(response);
             if (expectedSeq >= 0 && expectedSeq < seq) {
-                List<CompletableFuture<Void>> wait = new ArrayList<>();
-                for (long s = expectedSeq; s < seq; s++) {
-                    wait.add(waitForSeq(batchEpoch, s));
-                }
-                CompletableFuture.allOf(wait.toArray(CompletableFuture[]::new)).join();
+                awaitPredecessors(batchEpoch, expectedSeq, seq).join();
                 sendCloseWithRetry(data, batchEpoch, seq, false);
                 return;
             }
@@ -440,6 +440,13 @@ public final class IdempotentProducer implements AutoCloseable {
         return response.headers().firstValue(Protocol.H_PRODUCER_EPOCH).map(Long::parseLong).orElse(0L);
     }
 
+    private static long expectedSeq(HttpResponse<byte[]> response) {
+        return response.headers()
+            .firstValue(Protocol.H_PRODUCER_EXPECTED_SEQ)
+            .map(Long::parseLong)
+            .orElse(-1L);
+    }
+
     private static byte[] serialize(Object data) {
         if (data instanceof byte[] bytes) {
             return bytes;
@@ -450,7 +457,14 @@ public final class IdempotentProducer implements AutoCloseable {
         throw new IllegalArgumentException("Unsupported data type: " + data.getClass().getName());
     }
 
-    private static byte[] serializeBatch(List<byte[]> batch) {
+    private static byte[] serializeBatch(List<byte[]> batch, String contentType) {
+        boolean json = Objects.nonNull(contentType) && contentType.toLowerCase().contains("json");
+        if (json) {
+            if (batch.size() == 1 && DurableStream.looksLikeJsonArray(batch.get(0))) {
+                return batch.get(0);
+            }
+            return joinAsJsonArray(batch);
+        }
         if (batch.size() == 1) {
             return batch.get(0);
         }
@@ -465,5 +479,33 @@ public final class IdempotentProducer implements AutoCloseable {
             pos += bytes.length;
         }
         return result;
+    }
+
+    private static byte[] joinAsJsonArray(List<byte[]> batch) {
+        int total = batch.size() + 1;
+        for (byte[] bytes : batch) {
+            total += bytes.length;
+        }
+        byte[] result = new byte[total];
+        int pos = 0;
+        result[pos++] = '[';
+        for (int i = 0; i < batch.size(); i++) {
+            if (i > 0) {
+                result[pos++] = ',';
+            }
+            byte[] bytes = batch.get(i);
+            System.arraycopy(bytes, 0, result, pos, bytes.length);
+            pos += bytes.length;
+        }
+        result[pos] = ']';
+        return result;
+    }
+
+    private record Claim(long epoch, long seq) {
+    }
+
+    private static final class EpochSeqState {
+        final ConcurrentHashMap<Long, CompletableFuture<Void>> futures = new ConcurrentHashMap<>();
+        final AtomicLong highestCompleted = new AtomicLong(-1);
     }
 }

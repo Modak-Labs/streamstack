@@ -1,9 +1,11 @@
 package io.streamstack.client.internal;
 
+import java.util.Objects;
 import java.time.Duration;
 import java.util.Set;
 
 public final class RetryPolicy {
+
     private final int maxRetries;
     private final Duration initialDelay;
     private final Duration maxDelay;
@@ -20,7 +22,7 @@ public final class RetryPolicy {
         this.initialDelay = initialDelay;
         this.maxDelay = maxDelay;
         this.multiplier = multiplier;
-        this.retryableStatuses = retryableStatuses == null ? Set.of() : Set.copyOf(retryableStatuses);
+        this.retryableStatuses = Objects.isNull(retryableStatuses) ? Set.of() : Set.copyOf(retryableStatuses);
     }
 
     public static RetryPolicy defaults() {
@@ -44,11 +46,14 @@ public final class RetryPolicy {
         if (attempt >= maxRetries) {
             return false;
         }
-        return retryableStatuses.contains(statusCode) || (statusCode >= 500 && statusCode < 600);
+        return retryableStatuses.contains(statusCode);
     }
 
     public Duration delay(int attempt) {
-        double delay = initialDelay.toMillis() * Math.pow(multiplier, attempt);
+        if (attempt <= 1) {
+            return initialDelay;
+        }
+        double delay = initialDelay.toMillis() * Math.pow(multiplier, attempt - 1);
         return Duration.ofMillis(Math.min((long) delay, maxDelay.toMillis()));
     }
 
@@ -58,32 +63,26 @@ public final class RetryPolicy {
         private Duration maxDelay = Duration.ofSeconds(30);
         private double multiplier = 2.0;
         private Set<Integer> retryableStatuses = Set.of(429, 500, 502, 503, 504);
-
         public Builder maxRetries(int maxRetries) {
             this.maxRetries = maxRetries;
             return this;
         }
-
         public Builder initialDelay(Duration initialDelay) {
             this.initialDelay = initialDelay;
             return this;
         }
-
         public Builder maxDelay(Duration maxDelay) {
             this.maxDelay = maxDelay;
             return this;
         }
-
         public Builder multiplier(double multiplier) {
             this.multiplier = multiplier;
             return this;
         }
-
         public Builder retryableStatuses(Set<Integer> statuses) {
             this.retryableStatuses = statuses;
             return this;
         }
-
         public RetryPolicy build() {
             return new RetryPolicy(maxRetries, initialDelay, maxDelay, multiplier, retryableStatuses);
         }

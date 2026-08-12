@@ -22,6 +22,7 @@ package io.streamstack.api;
 import io.streamstack.api.KeyValue.Key;
 import io.streamstack.api.KeyValue.Value;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -59,4 +60,12 @@ public interface KVClient {
      * @return async delete result. {@link Value} deleted value, null if key not exist.
      */
     CompletableFuture<Value> delKV(Key key);
+
+    /**
+     * List key values whose keys start with the given prefix, ordered by key.
+     *
+     * @param prefix key prefix.
+     * @return async list result, empty list if no key matches.
+     */
+    CompletableFuture<List<KeyValue>> listKV(Key prefix);
 }

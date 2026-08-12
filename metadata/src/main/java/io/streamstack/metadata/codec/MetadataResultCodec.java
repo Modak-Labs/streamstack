@@ -1,5 +1,7 @@
 package io.streamstack.metadata.codec;
 
+import java.util.Objects;
+
 import io.streamstack.s3.metadata.StreamMetadata;
 import io.streamstack.s3.metadata.StreamState;
 import io.streamstack.s3.objects.CommitStreamSetObjectResponse;
@@ -7,6 +9,7 @@ import io.streamstack.s3.objects.CommitStreamSetObjectResponse;
 import java.nio.ByteBuffer;
 
 public final class MetadataResultCodec {
+
     private static final byte NULL = 0;
     private static final byte LONG = 1;
     private static final byte INT = 2;
@@ -18,7 +21,7 @@ public final class MetadataResultCodec {
     }
 
     public static byte[] encode(Object result) {
-        if (result == null) {
+        if (Objects.isNull(result)) {
             return new byte[] {NULL};
         }
         if (result instanceof Long value) {

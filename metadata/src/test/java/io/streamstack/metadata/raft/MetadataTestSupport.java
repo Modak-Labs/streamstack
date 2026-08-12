@@ -8,11 +8,11 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public final class MetadataTestSupport {
+
     private MetadataTestSupport() {
     }
 
     public static int freePort() throws Exception {
-        // Some RPC components reserve adjacent ports, so avoid the very top of the range.
         for (int i = 0; i < 100; i++) {
             try (ServerSocket socket = new ServerSocket(0)) {
                 socket.setReuseAddress(true);

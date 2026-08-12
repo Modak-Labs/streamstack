@@ -1,5 +1,7 @@
 package io.streamstack.server.ds;
 
+import java.util.Objects;
+
 import io.streamstack.server.model.config.RoutingMode;
 import io.streamstack.server.model.config.ServerConfig;
 
@@ -20,12 +22,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Requires MinIO at STREAMSTACK_S3_ENDPOINT (default http://127.0.0.1:9000) with buckets
- * streams-data and streams-wal, and AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY set.
- * Skip when MinIO is unreachable.
- */
 public class S3MinioIntegrationTest {
+
     @TempDir
     Path tempDir;
 
@@ -34,15 +32,11 @@ public class S3MinioIntegrationTest {
     void createAppendReadRestartRecovery() throws Exception {
         String endpoint = System.getenv().getOrDefault("STREAMSTACK_S3_ENDPOINT", "http://127.0.0.1:9000");
         Assumptions.assumeTrue(minioReachable(endpoint), "MinIO not reachable at " + endpoint);
-        Assumptions.assumeTrue(System.getenv("AWS_ACCESS_KEY_ID") != null, "AWS_ACCESS_KEY_ID required");
-        Assumptions.assumeTrue(System.getenv("AWS_SECRET_ACCESS_KEY") != null, "AWS_SECRET_ACCESS_KEY required");
-
+        Assumptions.assumeTrue(Objects.nonNull(System.getenv("AWS_ACCESS_KEY_ID")), "AWS_ACCESS_KEY_ID required");
+        Assumptions.assumeTrue(Objects.nonNull(System.getenv("AWS_SECRET_ACCESS_KEY")), "AWS_SECRET_ACCESS_KEY required");
         String storage = "0@s3://streams-data?region=us-east-1&endpoint=" + endpoint + "&pathStyle=true";
         String wal = "0@s3://streams-wal?region=us-east-1&endpoint=" + endpoint + "&pathStyle=true";
-        // WAL objects are namespaced by clusterId/nodeId; a unique clusterId per run avoids
-        // being fenced by leftover higher-epoch WAL objects from previous runs.
         String clusterId = "minio-smoke-" + System.currentTimeMillis();
-
         int httpPort = TestPorts.freePort();
         int raftPort = TestPorts.freePort();
         ServerConfig config = ServerConfig.builder()
@@ -60,13 +54,11 @@ public class S3MinioIntegrationTest {
             .routingMode(RoutingMode.LOCAL_ALWAYS)
             .longPollTimeoutSec(1)
             .build();
-
         String base;
         try (DurableStreamsServer server = new DurableStreamsServer(config)) {
             server.start();
             base = server.baseUrl() + "/streams/s3-demo";
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-
             HttpResponse<String> create = client.send(
                 HttpRequest.newBuilder(URI.create(base))
                     .header("Content-Type", "text/plain")
@@ -74,7 +66,6 @@ public class S3MinioIntegrationTest {
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(201, create.statusCode(), create.body());
-
             HttpResponse<String> append = client.send(
                 HttpRequest.newBuilder(URI.create(base))
                     .header("Content-Type", "text/plain")
@@ -83,7 +74,6 @@ public class S3MinioIntegrationTest {
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(204, append.statusCode());
         }
-
         ServerConfig recoverConfig = ServerConfig.builder()
             .nodeId(1)
             .nodeEpoch(2)
@@ -99,7 +89,6 @@ public class S3MinioIntegrationTest {
             .routingMode(RoutingMode.LOCAL_ALWAYS)
             .longPollTimeoutSec(1)
             .build();
-
         try (DurableStreamsServer server = new DurableStreamsServer(recoverConfig)) {
             server.start();
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();

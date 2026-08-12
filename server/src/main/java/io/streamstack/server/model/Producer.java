@@ -3,6 +3,7 @@ package io.streamstack.server.model;
 import java.util.Objects;
 
 public record Producer(String producerId, long epoch, long seq) {
+
     public Producer {
         Objects.requireNonNull(producerId, "producerId");
         if (producerId.isEmpty()) {

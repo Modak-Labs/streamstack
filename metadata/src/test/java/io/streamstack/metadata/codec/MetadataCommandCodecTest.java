@@ -1,7 +1,6 @@
 package io.streamstack.metadata.codec;
 
 import io.streamstack.metadata.model.MetadataCommand;
-
 import io.streamstack.s3.compact.CompactOperations;
 import io.streamstack.s3.objects.CommitStreamSetObjectRequest;
 import io.streamstack.s3.objects.CompactStreamObjectRequest;
@@ -16,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class MetadataCommandCodecTest {
+
     @Test
     void roundTripCommands() {
         assertRoundTrip(new MetadataCommand.CreateStream(7, 100));
@@ -31,7 +31,6 @@ public class MetadataCommandCodecTest {
         assertRoundTrip(new MetadataCommand.PutKV("path/a", new byte[] {1, 2, 3}));
         assertRoundTrip(new MetadataCommand.PutKVIfAbsent("path/b", new byte[] {4, 5}));
         assertRoundTrip(new MetadataCommand.DeleteKV("path/c"));
-
         CommitStreamSetObjectRequest commit = new CommitStreamSetObjectRequest();
         commit.setObjectId(11);
         commit.setOrderId(11);
@@ -49,7 +48,6 @@ public class MetadataCommandCodecTest {
         commit.setStreamObjects(List.of(streamObject));
         commit.setCompactedObjectIds(List.of(1L, 2L));
         assertStableEncoding(new MetadataCommand.CommitStreamSetObject(7, 100, commit, 123));
-
         CompactStreamObjectRequest compact = new CompactStreamObjectRequest(
             20, 64, 3, 9, 0, 20, List.of(12L), List.of(CompactOperations.DELETE), 3);
         assertStableEncoding(new MetadataCommand.CompactStreamObject(7, 100, compact, 456));

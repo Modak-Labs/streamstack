@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 public final class ServerConfig {
+
     private final int nodeId;
     private final long nodeEpoch;
     private final String httpHost;
@@ -104,9 +105,8 @@ public final class ServerConfig {
         return Optional.ofNullable(walUri);
     }
 
-    /** Defaults to the storage URI when storage is S3; otherwise {@code memory}. */
     public String resolveWalUri() {
-        if (walUri != null && !walUri.isBlank()) {
+        if (Objects.nonNull(walUri) && !walUri.isBlank()) {
             return walUri;
         }
         BucketURI storage = BucketURI.parse(storageUri);
@@ -164,15 +164,13 @@ public final class ServerConfig {
                 topoNodeId = Integer.parseInt(requireValue(args, ++i, "--node-id"));
             }
         }
-
         Builder builder = builder();
-        if (topoPath != null) {
-            if (topoNodeId == null) {
+        if (Objects.nonNull(topoPath)) {
+            if (Objects.isNull(topoNodeId)) {
                 throw new IllegalArgumentException("--topo requires --node-id");
             }
             builder.applyTopology(ClusterConfig.load(topoPath), topoNodeId);
         }
-
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
             switch (arg) {
@@ -231,129 +229,108 @@ public final class ServerConfig {
         private int maxChunkSize = 64 * 1024;
         private final StreamConfig.Builder streamConfig = StreamConfig.builder();
         private final Map<String, String> envs = new LinkedHashMap<>();
-
         public Builder nodeId(int nodeId) {
             this.nodeId = nodeId;
             return this;
         }
-
         public Builder nodeEpoch(long nodeEpoch) {
             this.nodeEpoch = nodeEpoch;
             return this;
         }
-
         public Builder httpHost(String httpHost) {
             this.httpHost = Objects.requireNonNull(httpHost);
             return this;
         }
-
         public Builder httpPort(int httpPort) {
             this.httpPort = httpPort;
             return this;
         }
-
         public Builder raftHost(String raftHost) {
             this.raftHost = Objects.requireNonNull(raftHost);
             return this;
         }
-
         public Builder raftPort(int raftPort) {
             this.raftPort = raftPort;
             return this;
         }
-
         public Builder addPeer(String peer) {
             this.raftPeers.add(peer);
             return this;
         }
-
         public Builder raftPeers(List<String> peers) {
             this.raftPeers.clear();
             this.raftPeers.addAll(peers);
             return this;
         }
-
         public Builder dataDir(File dataDir) {
             this.dataDir = Objects.requireNonNull(dataDir);
             return this;
         }
-
-        /** Expands to {@code -2@file://<abs-path>}. */
         public Builder objectDir(File objectDir) {
             Objects.requireNonNull(objectDir, "objectDir");
             this.storageUri = "-2@file://" + objectDir.getAbsolutePath();
             return this;
         }
-
         public Builder storageUri(String storageUri) {
             this.storageUri = Objects.requireNonNull(storageUri);
             return this;
         }
-
         public Builder walUri(String walUri) {
             this.walUri = walUri;
             return this;
         }
-
         public Builder clusterId(String clusterId) {
             this.clusterId = Objects.requireNonNull(clusterId);
             return this;
         }
-
         public Builder routingMode(RoutingMode routingMode) {
             this.routingMode = Objects.requireNonNull(routingMode);
             return this;
         }
-
         public Builder longPollTimeoutSec(int longPollTimeoutSec) {
             this.longPollTimeoutSec = longPollTimeoutSec;
             return this;
         }
-
         public Builder sseMaxDurationSec(int sseMaxDurationSec) {
             this.sseMaxDurationSec = sseMaxDurationSec;
             return this;
         }
-
         public Builder maxChunkSize(int maxChunkSize) {
             this.maxChunkSize = maxChunkSize;
             return this;
         }
-
         public StreamConfig.Builder streamConfig() {
             return streamConfig;
         }
-
         public Builder env(String name, String value) {
             this.envs.put(name, value);
             return this;
         }
-
         public Builder applyTopology(ClusterConfig topology, int forNodeId) {
             Objects.requireNonNull(topology, "topology");
             ClusterConfig.Node node = topology.requireNode(forNodeId);
             this.clusterId = topology.global().clusterName();
-            if (topology.global().storage() != null) {
+            if (Objects.nonNull(topology.global().storage())) {
                 this.storageUri = topology.global().storage();
             }
-            if (topology.global().wal() != null) {
+            if (Objects.nonNull(topology.global().wal())) {
                 this.walUri = topology.global().wal();
             }
             this.nodeId = node.nodeId();
             this.httpHost = node.host();
-            if (node.httpPort() != null) {
+            if (Objects.nonNull(node.httpPort())) {
                 this.httpPort = node.httpPort();
             }
             this.raftHost = node.host();
-            if (node.raftPort() != null) {
+            if (Objects.nonNull(node.raftPort())) {
                 this.raftPort = node.raftPort();
             }
-            if (node.dataDir() != null) {
+            if (Objects.nonNull(node.dataDir())) {
                 this.dataDir = new File(node.dataDir());
             }
             this.raftPeers.clear();
             for (ClusterConfig.Node peer : topology.nodes()) {
-                int peerRaft = peer.raftPort() != null ? peer.raftPort() : 8091;
+                int peerRaft = Objects.nonNull(peer.raftPort()) ? peer.raftPort() : 8091;
                 this.raftPeers.add(peer.host() + ":" + peerRaft);
             }
             for (ClusterConfig.Env env : topology.global().envs()) {
@@ -362,9 +339,8 @@ public final class ServerConfig {
             applyConfigMap(topology.global().config());
             return this;
         }
-
         public Builder applyConfigMap(Map<String, Object> config) {
-            if (config == null || config.isEmpty()) {
+            if (Objects.isNull(config) || config.isEmpty()) {
                 return this;
             }
             for (Map.Entry<String, Object> entry : config.entrySet()) {
@@ -384,14 +360,12 @@ public final class ServerConfig {
             }
             return this;
         }
-
         private static int toInt(Object value) {
             if (value instanceof Number number) {
                 return number.intValue();
             }
             return Integer.parseInt(String.valueOf(value));
         }
-
         public ServerConfig build() {
             return new ServerConfig(this);
         }

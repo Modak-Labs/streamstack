@@ -1,5 +1,7 @@
 package io.streamstack.server.ds;
 
+import java.util.Objects;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -10,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 
 public final class SseEncoder {
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final boolean json;
@@ -48,7 +51,7 @@ public final class SseEncoder {
     public byte[] controlEvent(String nextOffset, Long cursor, boolean upToDate, boolean closed) {
         ObjectNode node = MAPPER.createObjectNode();
         node.put("streamNextOffset", nextOffset);
-        if (!closed && cursor != null) {
+        if (!closed && Objects.nonNull(cursor)) {
             node.put("streamCursor", Long.toString(cursor));
         }
         node.put("upToDate", upToDate);
@@ -68,7 +71,7 @@ public final class SseEncoder {
     }
 
     public static String mimeOf(String contentType) {
-        if (contentType == null) {
+        if (Objects.isNull(contentType)) {
             return "";
         }
         int semi = contentType.indexOf(';');
@@ -88,7 +91,7 @@ public final class SseEncoder {
     }
 
     private static byte[] concat(List<byte[]> messages) {
-        if (messages == null || messages.isEmpty()) {
+        if (Objects.isNull(messages) || messages.isEmpty()) {
             return new byte[0];
         }
         if (messages.size() == 1) {

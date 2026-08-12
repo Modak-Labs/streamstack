@@ -1,9 +1,7 @@
 package io.streamstack.model.exception;
 
-/**
- * Requested offset was pruned / expired (HTTP 410).
- */
 public final class OffsetGoneException extends DurableStreamException {
+
     private final String url;
     private final String offset;
 

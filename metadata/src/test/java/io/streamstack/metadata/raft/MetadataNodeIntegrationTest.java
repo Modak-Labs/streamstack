@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class MetadataNodeIntegrationTest {
+
     @TempDir
     Path tempDir;
 
@@ -35,7 +36,6 @@ public class MetadataNodeIntegrationTest {
         int port = freePort();
         File dataDir = tempDir.resolve("node1").toFile();
         List<String> peers = MetadataNode.singlePeer("127.0.0.1", port);
-
         long streamId;
         long objectId;
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 1L)) {
@@ -43,11 +43,9 @@ public class MetadataNodeIntegrationTest {
             node.awaitRegistered(10, TimeUnit.SECONDS);
             RaftStreamManager streamManager = new RaftStreamManager(node);
             RaftObjectManager objectManager = new RaftObjectManager(node);
-
             streamId = streamManager.createStream().get(10, TimeUnit.SECONDS);
             StreamMetadata opened = streamManager.openStream(streamId, 1).get(10, TimeUnit.SECONDS);
             assertEquals(StreamState.OPENED, opened.state());
-
             objectId = objectManager.prepareObject(1, 60_000).get(10, TimeUnit.SECONDS);
             CommitStreamSetObjectRequest request = new CommitStreamSetObjectRequest();
             request.setObjectId(objectId);
@@ -55,18 +53,15 @@ public class MetadataNodeIntegrationTest {
             request.setOrderId(objectId);
             request.setStreamRanges(List.of(new ObjectStreamRange(streamId, 1, 0, 8, 32)));
             objectManager.commitStreamSetObject(request).get(10, TimeUnit.SECONDS);
-
             assertEquals(8, streamManager.getStreams(List.of(streamId)).get(10, TimeUnit.SECONDS).get(0).endOffset());
             assertEquals(1, objectManager.getObjectsCount().get(10, TimeUnit.SECONDS));
             node.triggerSnapshot();
         }
-
         try (MetadataNode restarted = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 2L)) {
             restarted.awaitLeader(10, TimeUnit.SECONDS);
             restarted.awaitRegistered(10, TimeUnit.SECONDS);
             RaftStreamManager streamManager = new RaftStreamManager(restarted);
             RaftObjectManager objectManager = new RaftObjectManager(restarted);
-
             StreamMetadata recovered = streamManager.getStreams(List.of(streamId)).get(10, TimeUnit.SECONDS).get(0);
             assertEquals(8, recovered.endOffset());
             assertEquals(StreamState.OPENED, recovered.state());
@@ -83,12 +78,10 @@ public class MetadataNodeIntegrationTest {
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 5L)) {
             node.awaitLeader(10, TimeUnit.SECONDS);
             node.awaitRegistered(10, TimeUnit.SECONDS);
-
             Exception e = assertThrows(Exception.class, () ->
                 node.client().propose(new MetadataCommand.CreateStream(node.nodeId(), 4L))
                     .get(10, TimeUnit.SECONDS));
             assertTrue(e.getCause().getMessage().contains("epoch"));
-
             long streamId = (Long) node.client()
                 .propose(new MetadataCommand.CreateStream(node.nodeId(), 5L)).get(10, TimeUnit.SECONDS);
             assertTrue(streamId >= 0);
@@ -127,11 +120,7 @@ public class MetadataNodeIntegrationTest {
                     io.netty.buffer.Unpooled.wrappedBuffer(new byte[] {1, 2, 3}))
                 .get(5, TimeUnit.SECONDS);
             assertTrue(storage.contains(key));
-
             markObjectDestroyedThroughLog(node, firstObjectId);
-
-            // The leader lifecycle cleaner drains the mark: physical delete first, then a
-            // replicated CleanDestroyedObjects command removes the catalog mark.
             awaitDestroyedBacklogEmpty(node);
             assertFalse(storage.contains(key));
         } finally {
@@ -154,7 +143,6 @@ public class MetadataNodeIntegrationTest {
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 1L, storage)) {
             node.awaitLeader(10, TimeUnit.SECONDS);
             node.awaitRegistered(10, TimeUnit.SECONDS);
-
             markObjectDestroyedThroughLog(node);
             assertThrows(Exception.class, () -> node.lifecycle().objectCleaner().clean(10));
             assertEquals(1, node.health().destroyedBacklog());
@@ -163,10 +151,6 @@ public class MetadataNodeIntegrationTest {
         }
     }
 
-    /**
-     * Arranges a destroyed-object mark through real replicated commands: commit a stream object,
-     * then compact it away with a DELETE operation on the source.
-     */
     private static long markObjectDestroyedThroughLog(MetadataNode node) throws Exception {
         RaftObjectManager objectManager = new RaftObjectManager(node);
         long firstObjectId = objectManager.prepareObject(2, 60_000).get(10, TimeUnit.SECONDS);
@@ -180,7 +164,6 @@ public class MetadataNodeIntegrationTest {
         long streamId = streamManager.createStream().get(10, TimeUnit.SECONDS);
         streamManager.openStream(streamId, 1).get(10, TimeUnit.SECONDS);
         long replacementObjectId = firstObjectId + 1;
-
         objectManager.compactStreamObject(new CompactStreamObjectRequest(
             firstObjectId, 3, streamId, 1, 0, 0, List.of(), List.of(), 0)).get(10, TimeUnit.SECONDS);
         objectManager.compactStreamObject(new CompactStreamObjectRequest(

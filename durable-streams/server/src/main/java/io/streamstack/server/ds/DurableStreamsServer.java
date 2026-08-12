@@ -12,15 +12,14 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Durable Streams HTTP facade over {@link StreamStackNode}.
- */
 public final class DurableStreamsServer implements AutoCloseable {
+
     private static final Logger LOGGER = LoggerFactory.getLogger(DurableStreamsServer.class);
 
     private final ServerConfig config;
     private final StreamStackNode node;
     private final Javalin app;
+
     private final AtomicBoolean started = new AtomicBoolean(false);
 
     public DurableStreamsServer(ServerConfig config) throws Exception {
@@ -32,11 +31,8 @@ public final class DurableStreamsServer implements AutoCloseable {
             Duration.ofSeconds(config.sseMaxDurationSec()),
             config.maxChunkSize());
         OwnershipRouter router = new OwnershipRouter(node.service(), handler, config.routingMode());
-
         this.app = Javalin.create(cfg -> {
             cfg.showJavalinBanner = false;
-            // Safe to set unconditionally: Javalin detects Loom at runtime,
-            // so this uses virtual threads on JDK 21+ and the platform pool on 17.
             cfg.useVirtualThreads = true;
         });
         app.get("/*", router::handle);

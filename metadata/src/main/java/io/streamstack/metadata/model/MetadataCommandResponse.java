@@ -3,13 +3,12 @@ package io.streamstack.metadata.model;
 import java.io.Serializable;
 
 public final class MetadataCommandResponse implements Serializable {
-    private static final long serialVersionUID = 1L;
 
+    private static final long serialVersionUID = 1L;
     public static final byte OK = 0;
     public static final byte NOT_LEADER = 1;
     public static final byte METADATA_ERROR = 2;
     public static final byte RAFT_ERROR = 3;
-
     private byte status;
     private String leaderId;
     private int errorCode;

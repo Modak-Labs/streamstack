@@ -1,9 +1,7 @@
 package io.streamstack.model.exception;
 
-/**
- * Stream is closed and no longer accepts appends (HTTP 409 with Stream-Closed).
- */
 public final class StreamClosedException extends DurableStreamException {
+
     private final String url;
 
     public StreamClosedException(String url) {

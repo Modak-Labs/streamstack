@@ -10,18 +10,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class KVControlManagerTest {
+
     @Test
     void putGetDeleteAndPutIfAbsent() {
         KVControlManager kv = new KVControlManager();
         byte[] value = "hello".getBytes(StandardCharsets.UTF_8);
         assertArrayEquals(value, kv.put("k", value));
         assertArrayEquals(value, kv.get("k"));
-
         byte[] other = "world".getBytes(StandardCharsets.UTF_8);
         assertArrayEquals(value, kv.putIfAbsent("k", other));
         assertArrayEquals(other, kv.putIfAbsent("k2", other));
         assertArrayEquals(other, kv.get("k2"));
-
         assertArrayEquals(value, kv.delete("k"));
         assertNull(kv.get("k"));
         assertNull(kv.delete("missing"));
@@ -34,7 +33,6 @@ public class KVControlManagerTest {
         kv.put("a", value);
         value[0] = 9;
         assertArrayEquals(new byte[] {1, 2, 3}, kv.get("a"));
-
         var snapshot = kv.snapshot();
         snapshot.get("a")[0] = 7;
         assertArrayEquals(new byte[] {1, 2, 3}, kv.get("a"));

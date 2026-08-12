@@ -6,11 +6,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 
-/**
- * Replicated key-value store for protocol-level stream registry data.
- * Mutations must only happen on the Raft apply path.
- */
 public final class KVControlManager {
+
     private final Map<String, byte[]> store = new HashMap<>();
 
     public byte[] put(String key, byte[] value) {
@@ -25,7 +22,7 @@ public final class KVControlManager {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(value, "value");
         byte[] existing = store.get(key);
-        if (existing != null) {
+        if (Objects.nonNull(existing)) {
             return Arrays.copyOf(existing, existing.length);
         }
         byte[] copy = Arrays.copyOf(value, value.length);
@@ -36,17 +33,28 @@ public final class KVControlManager {
     public byte[] get(String key) {
         Objects.requireNonNull(key, "key");
         byte[] existing = store.get(key);
-        return existing == null ? null : Arrays.copyOf(existing, existing.length);
+        return Objects.isNull(existing) ? null : Arrays.copyOf(existing, existing.length);
     }
 
     public byte[] delete(String key) {
         Objects.requireNonNull(key, "key");
         byte[] removed = store.remove(key);
-        return removed == null ? null : Arrays.copyOf(removed, removed.length);
+        return Objects.isNull(removed) ? null : Arrays.copyOf(removed, removed.length);
     }
 
     public Map<String, byte[]> entries() {
         return store;
+    }
+
+    public Map<String, byte[]> list(String prefix) {
+        Objects.requireNonNull(prefix, "prefix");
+        Map<String, byte[]> out = new TreeMap<>();
+        for (Map.Entry<String, byte[]> entry : store.entrySet()) {
+            if (entry.getKey().startsWith(prefix)) {
+                out.put(entry.getKey(), Arrays.copyOf(entry.getValue(), entry.getValue().length));
+            }
+        }
+        return out;
     }
 
     public Map<String, byte[]> snapshot() {
@@ -59,7 +67,7 @@ public final class KVControlManager {
 
     public void replaceAll(Map<String, byte[]> entries) {
         store.clear();
-        if (entries == null) {
+        if (Objects.isNull(entries)) {
             return;
         }
         for (Map.Entry<String, byte[]> entry : entries.entrySet()) {

@@ -8,7 +8,9 @@ import io.streamstack.metadata.model.MetadataCommand;
 import java.util.concurrent.CompletableFuture;
 
 public final class MetadataClosure implements Closure {
+
     private final MetadataCommand command;
+
     private final CompletableFuture<Object> future = new CompletableFuture<>();
 
     public MetadataClosure(MetadataCommand command) {

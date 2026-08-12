@@ -3,8 +3,8 @@ package io.streamstack.server.service;
 import io.streamstack.server.model.OffsetToken;
 
 public final class StreamServiceException extends Exception {
-    public enum Kind { NOT_FOUND, CONFLICT, CLOSED, BAD_REQUEST, FENCED, SEQUENCE_GAP }
 
+    public enum Kind { NOT_FOUND, CONFLICT, CLOSED, BAD_REQUEST, FENCED, SEQUENCE_GAP }
     private final Kind kind;
     private final OffsetToken nextOffset;
     private final boolean closed;

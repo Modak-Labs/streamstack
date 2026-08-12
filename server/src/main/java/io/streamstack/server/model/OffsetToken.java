@@ -2,13 +2,10 @@ package io.streamstack.server.model;
 
 import java.util.Objects;
 
-/**
- * Server-internal offset with record-index encoding.
- */
 public final class OffsetToken {
+
     private static final int WIDTH = 20;
     private static final String BEGINNING = "-1";
-
     private final String value;
     private final long recordOffset;
 
@@ -29,7 +26,7 @@ public final class OffsetToken {
     }
 
     public static OffsetToken parse(String raw) {
-        if (raw == null || BEGINNING.equals(raw)) {
+        if (Objects.isNull(raw) || BEGINNING.equals(raw)) {
             return beginning();
         }
         if (raw.isEmpty()) {

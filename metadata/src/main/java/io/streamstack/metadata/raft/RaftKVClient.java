@@ -1,5 +1,7 @@
 package io.streamstack.metadata.raft;
 
+import java.util.Objects;
+
 import io.streamstack.api.KVClient;
 import io.streamstack.api.KeyValue;
 import io.streamstack.api.KeyValue.Key;
@@ -7,9 +9,13 @@ import io.streamstack.api.KeyValue.Value;
 import io.streamstack.metadata.model.MetadataCommand;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 public final class RaftKVClient implements KVClient {
+
     private final MetadataNode metadataNode;
     private final MetadataClient client;
 
@@ -36,17 +42,30 @@ public final class RaftKVClient implements KVClient {
     public CompletableFuture<Value> getKV(Key key) {
         return client.readIndex(() ->
             metadataNode.stateMachine().kvControlManager().get(key.get()))
-            .thenApply(bytes -> bytes == null ? null : Value.of(bytes));
+            .thenApply(bytes -> Objects.isNull(bytes) ? null : Value.of(bytes));
     }
 
     @Override
     public CompletableFuture<Value> delKV(Key key) {
         return client.propose(new MetadataCommand.DeleteKV(key.get()))
-            .thenApply(result -> result == null ? null : toValue(result));
+            .thenApply(result -> Objects.isNull(result) ? null : toValue(result));
+    }
+
+    @Override
+    public CompletableFuture<List<KeyValue>> listKV(Key prefix) {
+        return client.readIndex(() ->
+            metadataNode.stateMachine().kvControlManager().list(prefix.get()))
+            .thenApply(entries -> {
+                List<KeyValue> out = new ArrayList<>(entries.size());
+                for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
+                    out.add(KeyValue.of(entry.getKey(), ByteBuffer.wrap(entry.getValue())));
+                }
+                return out;
+            });
     }
 
     private static byte[] toBytes(Value value) {
-        if (value == null || value.isNull()) {
+        if (Objects.isNull(value) || value.isNull()) {
             throw new IllegalArgumentException("value must not be null");
         }
         ByteBuffer buffer = value.get().duplicate();
@@ -56,7 +75,7 @@ public final class RaftKVClient implements KVClient {
     }
 
     private static Value toValue(Object result) {
-        if (result == null) {
+        if (Objects.isNull(result)) {
             return null;
         }
         return Value.of((byte[]) result);

@@ -1,5 +1,7 @@
 package io.streamstack.client.internal;
 
+import java.util.Objects;
+
 import io.streamstack.model.Protocol;
 import io.streamstack.model.exception.DurableStreamException;
 import io.streamstack.model.exception.OffsetGoneException;
@@ -10,8 +12,10 @@ import io.streamstack.model.exception.StreamExistsException;
 import io.streamstack.model.exception.StreamNotFoundException;
 
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 
 public final class ErrorMapper {
+
     private ErrorMapper() {
     }
 
@@ -19,12 +23,12 @@ public final class ErrorMapper {
         int status = response.statusCode();
         String body = bodyMessage(response);
         return switch (status) {
-            case 404 -> new StreamNotFoundException(url, body == null ? "stream not found: " + url : body);
+            case 404 -> new StreamNotFoundException(url, Objects.isNull(body) ? "stream not found: " + url : body);
             case 403 -> new StaleEpochException(headerLong(response, Protocol.H_PRODUCER_EPOCH),
-                body == null ? "Stale producer epoch" : body);
-            case 410 -> new OffsetGoneException(url, null, body == null ? "offset gone" : body);
+                Objects.isNull(body) ? "Stale producer epoch" : body);
+            case 410 -> new OffsetGoneException(url, null, Objects.isNull(body) ? "offset gone" : body);
             case 409 -> mapConflict(url, response, body);
-            default -> new DurableStreamException(body == null ? "request failed: " + status : body, status);
+            default -> new DurableStreamException(Objects.isNull(body) ? "request failed: " + status : body, status);
         };
     }
 
@@ -37,14 +41,14 @@ public final class ErrorMapper {
 
     private static DurableStreamException mapConflict(String url, HttpResponse<?> response, String body) {
         if (Protocol.BOOL_TRUE.equalsIgnoreCase(response.headers().firstValue(Protocol.H_STREAM_CLOSED).orElse(null))) {
-            return new StreamClosedException(url, body == null ? "stream closed: " + url : body);
+            return new StreamClosedException(url, Objects.isNull(body) ? "stream closed: " + url : body);
         }
         Long expected = headerLong(response, Protocol.H_PRODUCER_EXPECTED_SEQ);
         Long received = headerLong(response, Protocol.H_PRODUCER_RECEIVED_SEQ);
-        if (expected != null || received != null) {
-            return new SequenceConflictException(expected, received, body == null ? "Producer sequence gap" : body);
+        if (Objects.nonNull(expected) || Objects.nonNull(received)) {
+            return new SequenceConflictException(expected, received, Objects.isNull(body) ? "Producer sequence gap" : body);
         }
-        return new SequenceConflictException(null, null, body == null ? "conflict" : body);
+        return new SequenceConflictException(null, null, Objects.isNull(body) ? "conflict" : body);
     }
 
     private static Long headerLong(HttpResponse<?> response, String name) {
@@ -60,7 +64,7 @@ public final class ErrorMapper {
     private static String bodyMessage(HttpResponse<?> response) {
         Object body = response.body();
         if (body instanceof byte[] bytes && bytes.length > 0) {
-            return new String(bytes);
+            return new String(bytes, StandardCharsets.UTF_8);
         }
         if (body instanceof String s && !s.isEmpty()) {
             return s;

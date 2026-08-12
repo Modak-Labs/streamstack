@@ -22,7 +22,6 @@ public sealed interface MetadataCommand
     MetadataCommand.PutKV,
     MetadataCommand.PutKVIfAbsent,
     MetadataCommand.DeleteKV {
-
     byte CREATE_STREAM = 1;
     byte OPEN_STREAM = 2;
     byte TRIM_STREAM = 3;
@@ -37,18 +36,14 @@ public sealed interface MetadataCommand
     byte PUT_KV = 12;
     byte PUT_KV_IF_ABSENT = 13;
     byte DELETE_KV = 14;
-
     byte type();
-
     record RegisterNode(int nodeId, long nodeEpoch, String httpAddress) implements MetadataCommand {
         public RegisterNode {
-            httpAddress = httpAddress == null ? "" : httpAddress;
+            httpAddress = Objects.isNull(httpAddress) ? "" : httpAddress;
         }
-
         public RegisterNode(int nodeId, long nodeEpoch) {
             this(nodeId, nodeEpoch, "");
         }
-
         @Override
         public byte type() {
             return REGISTER_NODE;
@@ -134,12 +129,10 @@ public sealed interface MetadataCommand
             Objects.requireNonNull(value, "value");
             value = Arrays.copyOf(value, value.length);
         }
-
         @Override
         public byte type() {
             return PUT_KV;
         }
-
         @Override
         public boolean equals(Object o) {
             if (this == o) {
@@ -150,7 +143,6 @@ public sealed interface MetadataCommand
             }
             return Objects.equals(key, that.key) && Arrays.equals(value, that.value);
         }
-
         @Override
         public int hashCode() {
             return 31 * Objects.hash(key) + Arrays.hashCode(value);
@@ -163,12 +155,10 @@ public sealed interface MetadataCommand
             Objects.requireNonNull(value, "value");
             value = Arrays.copyOf(value, value.length);
         }
-
         @Override
         public byte type() {
             return PUT_KV_IF_ABSENT;
         }
-
         @Override
         public boolean equals(Object o) {
             if (this == o) {
@@ -179,7 +169,6 @@ public sealed interface MetadataCommand
             }
             return Objects.equals(key, that.key) && Arrays.equals(value, that.value);
         }
-
         @Override
         public int hashCode() {
             return 31 * Objects.hash(key) + Arrays.hashCode(value);
@@ -190,7 +179,6 @@ public sealed interface MetadataCommand
         public DeleteKV {
             Objects.requireNonNull(key, "key");
         }
-
         @Override
         public byte type() {
             return DELETE_KV;

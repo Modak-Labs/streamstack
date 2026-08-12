@@ -2,13 +2,10 @@ package io.streamstack.model;
 
 import java.util.Objects;
 
-/**
- * Opaque Durable Streams offset. Compare lexicographically or for equality only.
- */
 public final class Offset {
+
     public static final String BEGINNING = "-1";
     public static final String NOW = "now";
-
     private final String value;
 
     private Offset(String value) {
@@ -16,7 +13,7 @@ public final class Offset {
     }
 
     public static Offset of(String value) {
-        if (value == null || value.isEmpty()) {
+        if (Objects.isNull(value) || value.isEmpty()) {
             throw new IllegalArgumentException("empty offset");
         }
         return new Offset(value);
