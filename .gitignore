@@ -32,6 +32,7 @@ dependency-reduced-pom.xml
 *.log
 .env
 .env.*
+!harness/configs/.env.example
 
 ### Conformance / temp ###
 server/conformance-run.log

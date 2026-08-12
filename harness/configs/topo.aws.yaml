@@ -1,0 +1,14 @@
+global:
+  clusterName: aws
+  storage: 0@s3://streamstack-data?region=us-east-1
+  wal: 0@s3://streamstack-wal?region=us-east-1
+  config:
+    routing: LOCAL_ALWAYS
+    walCacheSize: 209715200
+    blockCacheSize: 104857600
+nodes:
+  - host: 127.0.0.1
+    nodeId: 1
+    httpPort: 4437
+    raftPort: 8091
+    dataDir: /tmp/streamstack/aws/n1

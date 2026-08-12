@@ -1,0 +1,28 @@
+services:
+  node1:
+    build:
+      context: ../../..
+      dockerfile: harness/deployment/docker/Dockerfile
+      args:
+        MODULE: frontend/ds/server
+        JAR: ds-server.jar
+    env_file:
+      - path: ../../configs/.env
+        required: false
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    volumes:
+      - ../../configs:/opt/streamstack/harness/configs:ro
+      - node1-data:/tmp/streamstack
+    network_mode: host
+    restart: on-failure
+    command:
+      - --topo
+      - ${TOPO}
+      - --node-id
+      - "${NODE_ID:-1}"
+
+volumes:
+  node1-data:

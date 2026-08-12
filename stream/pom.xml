@@ -7,7 +7,7 @@
     <parent>
         <groupId>io.streamstack</groupId>
         <artifactId>streamstack</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>${revision}</version>
     </parent>
 
     <artifactId>stream</artifactId>
@@ -17,27 +17,22 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
-            <version>${s3.version}</version>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>netty-nio-client</artifactId>
-            <version>${s3.version}</version>
         </dependency>
         <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-tcnative-boringssl-static</artifactId>
-            <version>2.0.53.Final</version>
         </dependency>
         <dependency>
             <groupId>com.bucket4j</groupId>
             <artifactId>bucket4j-core</artifactId>
-            <version>8.5.0</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.13.0</version>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -46,7 +41,6 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
-            <version>${slf4j.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -57,80 +51,65 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>${mockito-core.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
-            <version>4.2.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-junit-jupiter</artifactId>
-            <version>${mockito-core.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>net.sourceforge.argparse4j</groupId>
             <artifactId>argparse4j</artifactId>
-            <version>0.7.0</version>
         </dependency>
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
-            <version>32.0.1-jre</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>2.16.0</version>
         </dependency>
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-api</artifactId>
-            <version>${opentelemetry.version}</version>
         </dependency>
         <dependency>
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-instrumentation-annotations</artifactId>
-            <version>${opentelemetry.version}</version>
         </dependency>
         <dependency>
             <groupId>org.aspectj</groupId>
             <artifactId>aspectjrt</artifactId>
-            <version>${aspectj.version}</version>
         </dependency>
         <dependency>
             <groupId>org.aspectj</groupId>
             <artifactId>aspectjweaver</artifactId>
-            <version>${aspectj.version}</version>
         </dependency>
         <dependency>
             <groupId>com.github.jnr</groupId>
             <artifactId>jnr-posix</artifactId>
-            <version>3.1.19</version>
         </dependency>
         <dependency>
             <groupId>com.yammer.metrics</groupId>
             <artifactId>metrics-core</artifactId>
-            <version>2.2.0</version>
         </dependency>
         <dependency>
             <groupId>commons-codec</groupId>
             <artifactId>commons-codec</artifactId>
-            <version>1.17.0</version>
         </dependency>
         <dependency>
             <groupId>org.hdrhistogram</groupId>
             <artifactId>HdrHistogram</artifactId>
-            <version>2.2.2</version>
         </dependency>
         <dependency>
             <groupId>com.ibm.async</groupId>
             <artifactId>asyncutil</artifactId>
-            <version>0.1.0</version>
         </dependency>
     </dependencies>
 
@@ -152,14 +131,6 @@
             <plugin>
                 <groupId>dev.aspectj</groupId>
                 <artifactId>aspectj-maven-plugin</artifactId>
-                <version>1.13.1</version>
-                <dependencies>
-                    <dependency>
-                        <groupId>org.aspectj</groupId>
-                        <artifactId>aspectjtools</artifactId>
-                        <version>${aspectj.version}</version>
-                    </dependency>
-                </dependencies>
                 <configuration>
                     <complianceLevel>${maven.compiler.target}</complianceLevel>
                     <source>${maven.compiler.source}</source>

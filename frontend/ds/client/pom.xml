@@ -6,34 +6,26 @@
 
     <parent>
         <groupId>io.streamstack</groupId>
-        <artifactId>streamstack</artifactId>
+        <artifactId>ds</artifactId>
         <version>${revision}</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>metadata</artifactId>
-    <name>streamstack-metadata</name>
+    <artifactId>ds-client</artifactId>
+    <name>ds-client</name>
 
     <dependencies>
         <dependency>
             <groupId>io.streamstack</groupId>
-            <artifactId>stream</artifactId>
+            <artifactId>ds-model</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.alipay.sofa</groupId>
-            <artifactId>jraft-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.rocksdb</groupId>
-            <artifactId>rocksdbjni</artifactId>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -41,13 +33,4 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-            </plugin>
-        </plugins>
-    </build>
 </project>
