@@ -12,6 +12,7 @@ services:
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       TOPO: ${TOPO}
       NODE_ID: "1"
@@ -20,7 +21,9 @@ services:
     volumes:
       - ../configs:/opt/streamstack/harness/configs:ro
       - node1-data:/tmp/streamstack
-    network_mode: host
+    ports:
+      - "4437:4437"
+      - "8091:8091"
     restart: on-failure
 
 volumes:

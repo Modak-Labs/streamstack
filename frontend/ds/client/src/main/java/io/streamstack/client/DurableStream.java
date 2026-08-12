@@ -454,8 +454,6 @@ public final class DurableStream implements AutoCloseable {
     private AppendResponse parseAppend(HttpResponse<byte[]> response, String url, boolean producer, boolean hadBody) {
         int status = response.statusCode();
 
-        response.headers().firstValue(Protocol.H_CONTENT_TYPE).ifPresent(ct -> cacheContentType(url, ct));
-
         if (status == 200 || status == 201 || status == 204) {
             Offset next = response.headers().firstValue(Protocol.H_STREAM_NEXT_OFFSET).map(Offset::of).orElse(null);
             boolean closed = Protocol.BOOL_TRUE.equalsIgnoreCase(

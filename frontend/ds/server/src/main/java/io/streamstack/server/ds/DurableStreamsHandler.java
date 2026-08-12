@@ -224,6 +224,10 @@ public final class DurableStreamsHandler {
 
         respond(ctx, producerAppended ? 200 : 204, ProtocolConverter.toToken(response.nextOffset()), response.closed());
 
+        if (Objects.nonNull(contentType) && !contentType.isEmpty()) {
+            ctx.header(Protocol.H_CONTENT_TYPE, contentType);
+        }
+
         if (Objects.nonNull(response.producerEpoch())) {
             ctx.header(Protocol.H_PRODUCER_EPOCH, Long.toString(response.producerEpoch()));
         }

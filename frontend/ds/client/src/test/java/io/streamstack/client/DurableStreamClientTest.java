@@ -87,6 +87,25 @@ public class DurableStreamClientTest {
     }
 
     @Test
+    void successiveAppendsKeepSentContentType() {
+        List<String> sent = new ArrayList<>();
+
+        handle("/events", (exchange, attempt) -> {
+            sent.add(exchange.getRequestHeaders().getFirst("Content-Type"));
+            exchange.getResponseHeaders().set("Content-Type", "text/plain");
+            exchange.getResponseHeaders().set("Stream-Next-Offset", Integer.toString(attempt + 1));
+            reply(exchange, 204);
+        });
+
+        String path = url("/events");
+
+        client.append(path, "test".getBytes(StandardCharsets.UTF_8));
+        client.append(path, "test again".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(List.of("application/octet-stream", "application/octet-stream"), sent);
+    }
+
+    @Test
     void closeReportsAlreadyClosedOnlyForDuplicateClose() {
         AtomicBoolean closed = new AtomicBoolean(false);
 

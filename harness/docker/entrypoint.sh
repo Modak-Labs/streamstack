@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-set -- --topo "${TOPO:?}" --node-id "${NODE_ID:-1}"
+set -- --topo "${TOPO:?}" --node-id "${NODE_ID:-1}" --http-host 0.0.0.0
 if [ -n "${DATA_BUCKET:-}" ]; then
   set -- "$@" --storage "0@s3://${DATA_BUCKET}?region=${AWS_REGION:-us-east-1}"
 fi

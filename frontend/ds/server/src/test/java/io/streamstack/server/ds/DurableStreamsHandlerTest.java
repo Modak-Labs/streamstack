@@ -61,13 +61,13 @@ public class DurableStreamsHandlerTest {
             String base = "http://127.0.0.1:" + app.port() + "/streams/demo";
             HttpClient client = HttpClient.newHttpClient();
             HttpResponse<String> created = client.send(
-                HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
+                HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "application/octet-stream")
                     .PUT(HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(201, created.statusCode());
             assertTrue(created.headers().firstValue(Protocol.H_STREAM_NEXT_OFFSET).isPresent());
             HttpResponse<String> idempotent = client.send(
-                HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
+                HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "application/octet-stream")
                     .PUT(HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(200, idempotent.statusCode());
@@ -77,10 +77,11 @@ public class DurableStreamsHandlerTest {
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(409, conflict.statusCode());
             HttpResponse<String> appended = client.send(
-                HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
+                HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "application/octet-stream")
                     .POST(HttpRequest.BodyPublishers.ofString("hello")).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(204, appended.statusCode());
+            assertEquals("application/octet-stream", appended.headers().firstValue("Content-Type").orElse(""));
             HttpResponse<byte[]> read = client.send(
                 HttpRequest.newBuilder(URI.create(base + "?offset=-1")).GET().build(),
                 HttpResponse.BodyHandlers.ofByteArray());
@@ -99,7 +100,7 @@ public class DurableStreamsHandlerTest {
             assertEquals(204, closedAgain.statusCode());
             assertEquals("true", closedAgain.headers().firstValue(Protocol.H_STREAM_CLOSED).orElse(""));
             HttpResponse<String> rejected = client.send(
-                HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "text/plain")
+                HttpRequest.newBuilder(URI.create(base)).header("Content-Type", "application/octet-stream")
                     .POST(HttpRequest.BodyPublishers.ofString("x")).build(),
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(409, rejected.statusCode());
