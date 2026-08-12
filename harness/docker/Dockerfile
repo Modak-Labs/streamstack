@@ -8,5 +8,7 @@ FROM eclipse-temurin:21-jre
 ARG MODULE=frontend/ds/server
 ARG JAR=ds-server.jar
 COPY --from=build /build/${MODULE}/target/${JAR} /opt/streamstack/server.jar
+COPY harness/docker/entrypoint.sh /opt/streamstack/entrypoint.sh
 WORKDIR /opt/streamstack
-ENTRYPOINT ["java", "-jar", "/opt/streamstack/server.jar"]
+RUN chmod +x /opt/streamstack/entrypoint.sh
+ENTRYPOINT ["/opt/streamstack/entrypoint.sh"]

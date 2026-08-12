@@ -1,0 +1,51 @@
+x-env: &env
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  TOPO: /opt/streamstack/harness/configs/topo.cluster.yaml
+  DATA_BUCKET: ${DATA_BUCKET:-}
+  WAL_BUCKET: ${WAL_BUCKET:-}
+
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: harness/docker/Dockerfile
+    args:
+      MODULE: frontend/ds/server
+      JAR: ds-server.jar
+  env_file:
+    - path: ../configs/.env
+      required: false
+  network_mode: host
+  restart: on-failure
+
+services:
+  node1:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: "1"
+    volumes:
+      - ../configs:/opt/streamstack/harness/configs:ro
+      - node1-data:/tmp/streamstack
+  node2:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: "2"
+    volumes:
+      - ../configs:/opt/streamstack/harness/configs:ro
+      - node2-data:/tmp/streamstack
+  node3:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: "3"
+    volumes:
+      - ../configs:/opt/streamstack/harness/configs:ro
+      - node3-data:/tmp/streamstack
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

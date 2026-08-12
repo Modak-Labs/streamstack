@@ -2,25 +2,26 @@
 
 The server **is** the node: `DurableStreamsServer` and `S2Server` each embed the full `StreamStackNode` (raft, metadata, storage engine) in one JVM. Running streamstack means running one server process per node. DS and S2 are alternative protocol facades over the same engine — pick one per deployment.
 
-Storage is chosen by the topo file (`TOPO`), not by the facade compose file. Stack compose files with `-f` to combine a node with MinIO.
+Storage is chosen by the topo file (`TOPO`), not by the facade compose file. Stack compose files with `-f` to combine a node with MinIO. Set `DATA_BUCKET` / `WAL_BUCKET` to override the topo's S3 URIs without editing YAML.
 
 ## Layout
 
 - `configs/` — topo files + env samples
-- `deployment/docker/` — Dockerfile + compose files
+- `docker/` — Dockerfile + compose files
 
 | Compose file | What it runs |
 |--------------|--------------|
 | `docker-compose.minio.yml` | MinIO + bucket init |
-| `docker-compose.ds.yml` | `node1` running the DS facade |
-| `docker-compose.s2.yml` | `node1` running the S2 facade |
+| `docker-compose.ds.yml` | one DS node (`NODE_ID` 1) |
+| `docker-compose.s2.yml` | one S2 node (`NODE_ID` 1) |
+| `docker-compose.cluster.ds.yml` | three DS nodes (`topo.cluster.yaml`) |
 
 ## MinIO
 
 ```bash
 docker compose --env-file harness/configs/minio.env \
-  -f harness/deployment/docker/docker-compose.minio.yml \
-  -f harness/deployment/docker/docker-compose.ds.yml \
+  -f harness/docker/docker-compose.minio.yml \
+  -f harness/docker/docker-compose.ds.yml \
   up -d --build
 ```
 
@@ -29,7 +30,7 @@ Swap `docker-compose.ds.yml` for `docker-compose.s2.yml` to run S2 instead. Node
 Bare JVM:
 
 ```bash
-docker compose -f harness/deployment/docker/docker-compose.minio.yml up -d
+docker compose -f harness/docker/docker-compose.minio.yml up -d
 
 export AWS_ACCESS_KEY_ID=minioadmin
 export AWS_SECRET_ACCESS_KEY=minioadmin
@@ -44,24 +45,35 @@ Swap `frontend/ds/server` / `ds-server.jar` for `frontend/s2/server` / `s2-serve
 ## AWS S3
 
 1. Create data + WAL buckets.
-2. Edit `configs/topo.aws.yaml` bucket names / region.
-3. `cp harness/configs/.env.example harness/configs/.env` and fill `AWS_*`.
+2. `cp harness/configs/.env.example harness/configs/.env` and fill `AWS_*`, `DATA_BUCKET`, `WAL_BUCKET`.
 
 ```bash
 docker compose --env-file harness/configs/.env \
-  -f harness/deployment/docker/docker-compose.ds.yml \
+  -f harness/docker/docker-compose.ds.yml \
   up -d --build
 ```
 
 Or bare JVM (creds from env / `~/.aws` / IAM):
 
 ```bash
-java -jar frontend/ds/server/target/ds-server.jar --topo harness/configs/topo.aws.yaml --node-id 1
+java -jar frontend/ds/server/target/ds-server.jar \
+  --topo harness/configs/topo.aws.yaml --node-id 1 \
+  --storage "0@s3://${DATA_BUCKET}?region=${AWS_REGION}" \
+  --wal "0@s3://${WAL_BUCKET}?region=${AWS_REGION}"
 ```
 
 ## Multi-node
 
-One process per `nodeId`, same topo file, same buckets:
+`docker-compose.cluster.ds.yml` starts three DS processes against `topo.cluster.yaml`. Each service is a fixed `NODE_ID` (1 / 2 / 3). Host network so they bind 4437–4439 / 8091–8093 as in the topo.
+
+```bash
+docker compose --env-file harness/configs/minio.env \
+  -f harness/docker/docker-compose.minio.yml \
+  -f harness/docker/docker-compose.cluster.ds.yml \
+  up -d --build
+```
+
+Bare JVM, same topo, one process per id:
 
 ```bash
 java -jar frontend/ds/server/target/ds-server.jar --topo harness/configs/topo.cluster.yaml --node-id 1
@@ -69,7 +81,7 @@ java -jar frontend/ds/server/target/ds-server.jar --topo harness/configs/topo.cl
 java -jar frontend/ds/server/target/ds-server.jar --topo harness/configs/topo.cluster.yaml --node-id 3
 ```
 
-Peers are derived from the topo's `nodes` list. `topo.cluster.yaml` defaults to MinIO storage; swap the URIs for AWS.
+`topo.cluster.yaml` defaults to MinIO storage; set `DATA_BUCKET` / `WAL_BUCKET` (compose) or `--storage` / `--wal` (JVM) for AWS.
 
 ## Topology notes
 
@@ -88,7 +100,7 @@ Omit `global.wal` to default WAL to the storage URI when storage is S3.
 
 ```bash
 docker compose --env-file harness/configs/minio.env \
-  -f harness/deployment/docker/docker-compose.minio.yml \
-  -f harness/deployment/docker/docker-compose.ds.yml \
+  -f harness/docker/docker-compose.minio.yml \
+  -f harness/docker/docker-compose.ds.yml \
   down -v
 ```
