@@ -33,24 +33,31 @@ public final class OwnershipRouter {
             handler.handle(ctx);
             return;
         }
+
         try {
             String name = streamName(ctx);
             Owner owner = ownership.ownerOf(name);
             NodeMeta local = ownership.localNode();
+
             if (owner.local()
                 || Objects.isNull(owner.ownerAdvertisedAddress())
                 || owner.ownerAdvertisedAddress().equals(local.advertisedAddress())) {
                 handler.handle(ctx);
                 return;
             }
+
             String location = owner.ownerAdvertisedAddress();
+
             if (location.endsWith("/")) {
                 location = location.substring(0, location.length() - 1);
             }
+
             location += ctx.path().startsWith("/") ? ctx.path() : "/" + ctx.path();
+
             if (Objects.nonNull(ctx.queryString()) && !ctx.queryString().isEmpty()) {
                 location += "?" + ctx.queryString();
             }
+
             ctx.status(307);
             ctx.header(Protocol.H_LOCATION, location);
             ctx.header(Protocol.H_CACHE_CONTROL, "no-store");

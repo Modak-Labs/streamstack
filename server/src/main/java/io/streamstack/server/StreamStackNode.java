@@ -60,11 +60,14 @@ public final class StreamStackNode implements AutoCloseable {
         this.config = Objects.requireNonNull(config, "config");
         Files.createDirectories(config.dataDir().toPath());
         File objectDir = config.objectDir();
+
         if (Objects.nonNull(objectDir)) {
             Files.createDirectories(objectDir.toPath());
         }
+
         config.streamConfig().allocPolicy().ifPresent(ByteBufAlloc::setPolicy);
         BucketURI storageBucket = BucketURI.parse(config.storageUri());
+
         this.objectStorage = ObjectStorageFactory.instance()
             .builder(storageBucket)
             .threadPrefix("data")
@@ -82,17 +85,21 @@ public final class StreamStackNode implements AutoCloseable {
         RaftStreamManager streamManager = new RaftStreamManager(metadataNode);
         RaftObjectManager objectManager = new RaftObjectManager(metadataNode);
         Config streamConfig = new Config();
+
         streamConfig.nodeId(config.nodeId());
         streamConfig.nodeEpoch(config.nodeEpoch());
         streamConfig.version(() -> Version.LATEST);
         config.applyTo(streamConfig);
+
         try {
             ConfigValidator.validate(streamConfig);
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("invalid stream config: " + e.getMessage(), e);
         }
+
         String walUri = config.resolveWalUri();
         WalBundle walBundle = createWal(walUri, storageBucket, objectStorage);
+
         this.walObjectStorage = walBundle.objectStorage();
         this.storage = new S3Storage(
             streamConfig,
@@ -110,6 +117,7 @@ public final class StreamStackNode implements AutoCloseable {
         this.kvClient = new RaftKVClient(metadataNode);
         this.streamService = new S3StreamService(streamClient, kvClient, metadataNode, new StreamWaiterRegistry());
         RaftOwnershipService ownership = new RaftOwnershipService(metadataNode, streamService);
+
         this.service = new StreamService(streamService, streamService, streamService, ownership);
     }
 
@@ -117,9 +125,11 @@ public final class StreamStackNode implements AutoCloseable {
         if (isMemoryWal(walUri)) {
             return new WalBundle(new MemoryWriteAheadLog(), null);
         }
+
         BucketURI walBucket = BucketURI.parse(walUri);
         ObjectStorage walStorage;
         boolean shared = sameBucket(dataBucket, walBucket);
+
         if (shared) {
             walStorage = dataStorage;
         } else {
@@ -128,6 +138,7 @@ public final class StreamStackNode implements AutoCloseable {
                 .threadPrefix("wal")
                 .build();
         }
+
         ObjectWALConfig walConfig = ObjectWALConfig.builder()
             .withURI(IdURI.parse(walUri))
             .withClusterId(config.clusterId())
@@ -141,7 +152,9 @@ public final class StreamStackNode implements AutoCloseable {
         if (Objects.isNull(walUri) || walUri.isBlank()) {
             return true;
         }
+
         String normalized = walUri.trim().toLowerCase();
+
         return "memory".equals(normalized)
             || "mem".equals(normalized)
             || normalized.startsWith("mem://")
@@ -160,6 +173,7 @@ public final class StreamStackNode implements AutoCloseable {
         if (!started.compareAndSet(false, true)) {
             return;
         }
+
         metadataNode.awaitLeader(30, TimeUnit.SECONDS);
         metadataNode.awaitRegistered(30, TimeUnit.SECONDS);
         storage.startup();
@@ -203,31 +217,38 @@ public final class StreamStackNode implements AutoCloseable {
                 } catch (Exception ignored) {
                 }
             }
+
             streamService.shutdown();
         } catch (Exception ignored) {
         }
+
         try {
             compactionManager.shutdown();
         } catch (Exception ignored) {
         }
+
         try {
             streamClient.shutdown();
         } catch (Exception ignored) {
         }
+
         try {
             storage.shutdown();
         } catch (Exception ignored) {
         }
+
         if (Objects.nonNull(walObjectStorage)) {
             try {
                 walObjectStorage.close();
             } catch (Exception ignored) {
             }
         }
+
         try {
             objectStorage.close();
         } catch (Exception ignored) {
         }
+
         metadataNode.close();
         started.set(false);
     }

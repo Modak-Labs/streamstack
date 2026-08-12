@@ -91,9 +91,11 @@ public final class ServerConfig {
 
     public File objectDir() {
         BucketURI uri = BucketURI.parse(storageUri);
+
         if (!"file".equalsIgnoreCase(uri.protocol())) {
             return null;
         }
+
         return new File(uri.bucket());
     }
 
@@ -109,10 +111,13 @@ public final class ServerConfig {
         if (Objects.nonNull(walUri) && !walUri.isBlank()) {
             return walUri;
         }
+
         BucketURI storage = BucketURI.parse(storageUri);
+
         if ("s3".equalsIgnoreCase(storage.protocol())) {
             return storageUri;
         }
+
         return "memory";
     }
 
@@ -157,6 +162,7 @@ public final class ServerConfig {
     public static ServerConfig fromArgs(String[] args) {
         Path topoPath = null;
         Integer topoNodeId = null;
+
         for (int i = 0; i < args.length; i++) {
             if ("--topo".equals(args[i])) {
                 topoPath = Path.of(requireValue(args, ++i, "--topo"));
@@ -164,15 +170,20 @@ public final class ServerConfig {
                 topoNodeId = Integer.parseInt(requireValue(args, ++i, "--node-id"));
             }
         }
+
         Builder builder = builder();
+
         if (Objects.nonNull(topoPath)) {
             if (Objects.isNull(topoNodeId)) {
                 throw new IllegalArgumentException("--topo requires --node-id");
             }
+
             builder.applyTopology(ClusterConfig.load(topoPath), topoNodeId);
         }
+
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
+
             switch (arg) {
                 case "--topo" -> i++;
                 case "--node-id" -> builder.nodeId(Integer.parseInt(requireValue(args, ++i, arg)));
@@ -198,9 +209,11 @@ public final class ServerConfig {
                 default -> throw new IllegalArgumentException("unknown arg: " + arg);
             }
         }
+
         if (builder.raftPeers.isEmpty()) {
             builder.addPeer(builder.raftHost + ":" + builder.raftPort);
         }
+
         return builder.build();
     }
 
@@ -208,6 +221,7 @@ public final class ServerConfig {
         if (index >= args.length) {
             throw new IllegalArgumentException("missing value for " + flag);
         }
+
         return args[index];
     }
 
@@ -233,122 +247,161 @@ public final class ServerConfig {
             this.nodeId = nodeId;
             return this;
         }
+
         public Builder nodeEpoch(long nodeEpoch) {
             this.nodeEpoch = nodeEpoch;
             return this;
         }
+
         public Builder httpHost(String httpHost) {
             this.httpHost = Objects.requireNonNull(httpHost);
             return this;
         }
+
         public Builder httpPort(int httpPort) {
             this.httpPort = httpPort;
             return this;
         }
+
         public Builder raftHost(String raftHost) {
             this.raftHost = Objects.requireNonNull(raftHost);
             return this;
         }
+
         public Builder raftPort(int raftPort) {
             this.raftPort = raftPort;
             return this;
         }
+
         public Builder addPeer(String peer) {
             this.raftPeers.add(peer);
             return this;
         }
+
         public Builder raftPeers(List<String> peers) {
             this.raftPeers.clear();
             this.raftPeers.addAll(peers);
+
             return this;
         }
+
         public Builder dataDir(File dataDir) {
             this.dataDir = Objects.requireNonNull(dataDir);
             return this;
         }
+
         public Builder objectDir(File objectDir) {
             Objects.requireNonNull(objectDir, "objectDir");
             this.storageUri = "-2@file://" + objectDir.getAbsolutePath();
+
             return this;
         }
+
         public Builder storageUri(String storageUri) {
             this.storageUri = Objects.requireNonNull(storageUri);
             return this;
         }
+
         public Builder walUri(String walUri) {
             this.walUri = walUri;
             return this;
         }
+
         public Builder clusterId(String clusterId) {
             this.clusterId = Objects.requireNonNull(clusterId);
             return this;
         }
+
         public Builder routingMode(RoutingMode routingMode) {
             this.routingMode = Objects.requireNonNull(routingMode);
             return this;
         }
+
         public Builder longPollTimeoutSec(int longPollTimeoutSec) {
             this.longPollTimeoutSec = longPollTimeoutSec;
             return this;
         }
+
         public Builder sseMaxDurationSec(int sseMaxDurationSec) {
             this.sseMaxDurationSec = sseMaxDurationSec;
             return this;
         }
+
         public Builder maxChunkSize(int maxChunkSize) {
             this.maxChunkSize = maxChunkSize;
             return this;
         }
+
         public StreamConfig.Builder streamConfig() {
             return streamConfig;
         }
+
         public Builder env(String name, String value) {
             this.envs.put(name, value);
             return this;
         }
+
         public Builder applyTopology(ClusterConfig topology, int forNodeId) {
             Objects.requireNonNull(topology, "topology");
             ClusterConfig.Node node = topology.requireNode(forNodeId);
+
             this.clusterId = topology.global().clusterName();
+
             if (Objects.nonNull(topology.global().storage())) {
                 this.storageUri = topology.global().storage();
             }
+
             if (Objects.nonNull(topology.global().wal())) {
                 this.walUri = topology.global().wal();
             }
+
             this.nodeId = node.nodeId();
             this.httpHost = node.host();
+
             if (Objects.nonNull(node.httpPort())) {
                 this.httpPort = node.httpPort();
             }
+
             this.raftHost = node.host();
+
             if (Objects.nonNull(node.raftPort())) {
                 this.raftPort = node.raftPort();
             }
+
             if (Objects.nonNull(node.dataDir())) {
                 this.dataDir = new File(node.dataDir());
             }
+
             this.raftPeers.clear();
+
             for (ClusterConfig.Node peer : topology.nodes()) {
                 int peerRaft = Objects.nonNull(peer.raftPort()) ? peer.raftPort() : 8091;
+
                 this.raftPeers.add(peer.host() + ":" + peerRaft);
             }
+
             for (ClusterConfig.Env env : topology.global().envs()) {
                 this.envs.put(env.name(), env.value());
             }
+
             applyConfigMap(topology.global().config());
+
             return this;
         }
+
         public Builder applyConfigMap(Map<String, Object> config) {
             if (Objects.isNull(config) || config.isEmpty()) {
                 return this;
             }
+
             for (Map.Entry<String, Object> entry : config.entrySet()) {
                 String key = entry.getKey();
                 Object value = entry.getValue();
+
                 if (streamConfig.apply(key, value)) {
                     continue;
                 }
+
                 switch (key) {
                     case "routing" -> routingMode(RoutingMode.valueOf(String.valueOf(value)));
                     case "longPollTimeoutSec" -> longPollTimeoutSec(toInt(value));
@@ -358,14 +411,18 @@ public final class ServerConfig {
                     default -> throw new IllegalArgumentException("unknown topology config key: " + key);
                 }
             }
+
             return this;
         }
+
         private static int toInt(Object value) {
             if (value instanceof Number number) {
                 return number.intValue();
             }
+
             return Integer.parseInt(String.valueOf(value));
         }
+
         public ServerConfig build() {
             return new ServerConfig(this);
         }

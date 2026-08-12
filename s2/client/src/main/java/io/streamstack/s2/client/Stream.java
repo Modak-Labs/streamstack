@@ -74,17 +74,22 @@ public final class Stream {
         if (Objects.isNull(request)) {
             return "";
         }
+
         StringBuilder query = new StringBuilder();
+
         HttpTransport.appendParam(query, Protocol.Q_SEQ_NUM, request.seqNum());
         HttpTransport.appendParam(query, Protocol.Q_TIMESTAMP, request.timestamp());
         HttpTransport.appendParam(query, Protocol.Q_TAIL_OFFSET, request.tailOffset());
+
         if (request.clamp()) {
             HttpTransport.appendParam(query, Protocol.Q_CLAMP, "true");
         }
+
         HttpTransport.appendParam(query, Protocol.Q_COUNT, request.count());
         HttpTransport.appendParam(query, Protocol.Q_BYTES, request.bytes());
         HttpTransport.appendParam(query, Protocol.Q_UNTIL, request.until());
         HttpTransport.appendParam(query, Protocol.Q_WAIT, request.waitSeconds());
+
         return query.isEmpty() ? "" : "?" + query;
     }
 }

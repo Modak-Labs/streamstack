@@ -36,6 +36,7 @@ public class MetadataClusterIntegrationTest {
             awaitLeader(30, TimeUnit.SECONDS, node1, node2);
             MetadataNode leader = node1.isLeader() ? node1 : node2;
             MetadataNode follower = leader == node1 ? node2 : node1;
+
             assertTrue(leader.isLeader());
             assertFalse(follower.isLeader());
             leader.awaitRegistered(20, TimeUnit.SECONDS);
@@ -43,6 +44,7 @@ public class MetadataClusterIntegrationTest {
             RaftStreamManager followerStreamManager = new RaftStreamManager(follower);
             long streamId = followerStreamManager.createStream().get(20, TimeUnit.SECONDS);
             StreamMetadata opened = followerStreamManager.openStream(streamId, 1).get(20, TimeUnit.SECONDS);
+
             assertEquals(StreamState.OPENED, opened.state());
             assertEquals(follower.nodeId(), opened.nodeId());
             StreamMetadata fromLeader = new RaftStreamManager(leader)
@@ -68,17 +70,22 @@ public class MetadataClusterIntegrationTest {
              MetadataNode node2 = new MetadataNode(2, "127.0.0.1", port2, tempDir.resolve("d2").toFile(), peers, 1L)) {
             awaitLeader(30, TimeUnit.SECONDS, node1, node2);
             MetadataNode leader = node1.isLeader() ? node1 : node2;
+
             leader.awaitRegistered(20, TimeUnit.SECONDS);
             RaftStreamManager streamManager = new RaftStreamManager(leader);
             long streamId = streamManager.createStream().get(20, TimeUnit.SECONDS);
+
             streamManager.openStream(streamId, 5).get(20, TimeUnit.SECONDS);
+
             try {
                 streamManager.openStream(streamId, 3).get(20, TimeUnit.SECONDS);
                 throw new AssertionError("expected fenced open to fail");
             } catch (ExecutionException expected) {
                 assertNotNull(expected.getCause());
             }
+
             long nextStreamId = streamManager.createStream().get(20, TimeUnit.SECONDS);
+
             assertTrue(nextStreamId > streamId);
             assertReplicasConverged(20, TimeUnit.SECONDS, node1, node2);
         }

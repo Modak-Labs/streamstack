@@ -38,16 +38,20 @@ public class MetadataNodeIntegrationTest {
         List<String> peers = MetadataNode.singlePeer("127.0.0.1", port);
         long streamId;
         long objectId;
+
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 1L)) {
             node.awaitLeader(10, TimeUnit.SECONDS);
             node.awaitRegistered(10, TimeUnit.SECONDS);
             RaftStreamManager streamManager = new RaftStreamManager(node);
             RaftObjectManager objectManager = new RaftObjectManager(node);
+
             streamId = streamManager.createStream().get(10, TimeUnit.SECONDS);
             StreamMetadata opened = streamManager.openStream(streamId, 1).get(10, TimeUnit.SECONDS);
+
             assertEquals(StreamState.OPENED, opened.state());
             objectId = objectManager.prepareObject(1, 60_000).get(10, TimeUnit.SECONDS);
             CommitStreamSetObjectRequest request = new CommitStreamSetObjectRequest();
+
             request.setObjectId(objectId);
             request.setObjectSize(32);
             request.setOrderId(objectId);
@@ -57,12 +61,14 @@ public class MetadataNodeIntegrationTest {
             assertEquals(1, objectManager.getObjectsCount().get(10, TimeUnit.SECONDS));
             node.triggerSnapshot();
         }
+
         try (MetadataNode restarted = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 2L)) {
             restarted.awaitLeader(10, TimeUnit.SECONDS);
             restarted.awaitRegistered(10, TimeUnit.SECONDS);
             RaftStreamManager streamManager = new RaftStreamManager(restarted);
             RaftObjectManager objectManager = new RaftObjectManager(restarted);
             StreamMetadata recovered = streamManager.getStreams(List.of(streamId)).get(10, TimeUnit.SECONDS).get(0);
+
             assertEquals(8, recovered.endOffset());
             assertEquals(StreamState.OPENED, recovered.state());
             assertTrue(objectManager.isObjectExist(objectId));
@@ -75,6 +81,7 @@ public class MetadataNodeIntegrationTest {
         int port = freePort();
         File dataDir = tempDir.resolve("fencing").toFile();
         List<String> peers = MetadataNode.singlePeer("127.0.0.1", port);
+
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 5L)) {
             node.awaitLeader(10, TimeUnit.SECONDS);
             node.awaitRegistered(10, TimeUnit.SECONDS);
@@ -93,6 +100,7 @@ public class MetadataNodeIntegrationTest {
         int port = freePort();
         File dataDir = tempDir.resolve("retry").toFile();
         List<String> peers = MetadataNode.singlePeer("127.0.0.1", port);
+
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 1L)) {
             node.awaitRegistered(15, TimeUnit.SECONDS);
             Long streamId = (Long) node.client()
@@ -110,12 +118,14 @@ public class MetadataNodeIntegrationTest {
         File dataDir = tempDir.resolve("cleaner").toFile();
         List<String> peers = MetadataNode.singlePeer("127.0.0.1", port);
         MemoryObjectStorage storage = new MemoryObjectStorage();
+
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 1L, storage)) {
             node.awaitLeader(10, TimeUnit.SECONDS);
             node.awaitRegistered(10, TimeUnit.SECONDS);
             RaftObjectManager objectManager = new RaftObjectManager(node);
             long firstObjectId = objectManager.prepareObject(2, 60_000).get(10, TimeUnit.SECONDS);
             String key = ObjectUtils.genKey(0, firstObjectId);
+
             storage.write(ObjectStorage.WriteOptions.DEFAULT, key,
                     io.netty.buffer.Unpooled.wrappedBuffer(new byte[] {1, 2, 3}))
                 .get(5, TimeUnit.SECONDS);
@@ -140,6 +150,7 @@ public class MetadataNodeIntegrationTest {
                 return CompletableFuture.failedFuture(new IllegalStateException("simulated storage outage"));
             }
         };
+
         try (MetadataNode node = new MetadataNode(1, "127.0.0.1", port, dataDir, peers, 1L, storage)) {
             node.awaitLeader(10, TimeUnit.SECONDS);
             node.awaitRegistered(10, TimeUnit.SECONDS);
@@ -154,7 +165,9 @@ public class MetadataNodeIntegrationTest {
     private static long markObjectDestroyedThroughLog(MetadataNode node) throws Exception {
         RaftObjectManager objectManager = new RaftObjectManager(node);
         long firstObjectId = objectManager.prepareObject(2, 60_000).get(10, TimeUnit.SECONDS);
+
         markObjectDestroyedThroughLog(node, firstObjectId);
+
         return firstObjectId;
     }
 
@@ -162,8 +175,10 @@ public class MetadataNodeIntegrationTest {
         RaftStreamManager streamManager = new RaftStreamManager(node);
         RaftObjectManager objectManager = new RaftObjectManager(node);
         long streamId = streamManager.createStream().get(10, TimeUnit.SECONDS);
+
         streamManager.openStream(streamId, 1).get(10, TimeUnit.SECONDS);
         long replacementObjectId = firstObjectId + 1;
+
         objectManager.compactStreamObject(new CompactStreamObjectRequest(
             firstObjectId, 3, streamId, 1, 0, 0, List.of(), List.of(), 0)).get(10, TimeUnit.SECONDS);
         objectManager.compactStreamObject(new CompactStreamObjectRequest(
@@ -173,12 +188,15 @@ public class MetadataNodeIntegrationTest {
 
     private static void awaitDestroyedBacklogEmpty(MetadataNode node) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+
         while (System.nanoTime() < deadline) {
             if (node.health().destroyedBacklog() == 0) {
                 return;
             }
+
             Thread.sleep(50);
         }
+
         throw new IllegalStateException("destroyed backlog never drained");
     }
 }

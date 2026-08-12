@@ -41,6 +41,7 @@ public class MultiNodeRoutingIntegrationTest {
         DurableStreamsServer serverA = new DurableStreamsServer(configA);
         DurableStreamsServer serverB = new DurableStreamsServer(configB);
         DurableStreamsServer serverC = new DurableStreamsServer(configC);
+
         try {
             serverA.start();
             serverB.start();
@@ -83,6 +84,7 @@ public class MultiNodeRoutingIntegrationTest {
             assertEquals("from-b", new String(read.body(), StandardCharsets.UTF_8));
             serverA.close();
             HttpResponse<String> afterFailover = null;
+
             for (int i = 0; i < 20; i++) {
                 afterFailover = follow.send(
                     HttpRequest.newBuilder(URI.create(serverB.baseUrl() + path))
@@ -94,8 +96,10 @@ public class MultiNodeRoutingIntegrationTest {
                 if (afterFailover.statusCode() == 204) {
                     break;
                 }
+
                 Thread.sleep(250);
             }
+
             assertEquals(204, afterFailover.statusCode());
         } finally {
             closeQuietly(serverA);

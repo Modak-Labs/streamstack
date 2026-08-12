@@ -60,17 +60,22 @@ public final class SseStreamingReader implements AutoCloseable {
         if (!started.compareAndSet(false, true)) {
             return;
         }
+
         try {
             HttpResponse<InputStream> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             int status = response.statusCode();
+
             if (status != 200) {
                 closeQuietly(response.body());
+
                 if (status == 404) {
                     throw new StreamNotFoundException(request.uri().toString());
                 }
+
                 throw new DurableStreamException("SSE connection failed with status: " + status, status);
             }
+
             encoding = response.headers().firstValue(Protocol.H_STREAM_SSE_DATA_ENCODING).orElse(null);
             inputStream = response.body();
             readerThread = new Thread(this::readLoop, "sse-reader");
@@ -87,12 +92,15 @@ public final class SseStreamingReader implements AutoCloseable {
     public Chunk poll(long timeoutMs) throws DurableStreamException {
         try {
             ChunkOrError result = chunkQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
+
             if (Objects.isNull(result)) {
                 return null;
             }
+
             if (Objects.nonNull(result.error)) {
                 throw result.error;
             }
+
             return result.chunk;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -125,9 +133,11 @@ public final class SseStreamingReader implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+
         if (Objects.nonNull(readerThread)) {
             readerThread.interrupt();
         }
+
         closeQuietly(inputStream);
     }
 
@@ -143,24 +153,31 @@ public final class SseStreamingReader implements AutoCloseable {
     private void readLoop() {
         SseParser parser = new SseParser(inputStream);
         List<String> pendingData = new ArrayList<>();
+
         try {
             while (!closed.get() && !Thread.currentThread().isInterrupted()) {
                 SseParser.SseEvent event = parser.nextEvent();
+
                 if (Objects.isNull(event)) {
                     break;
                 }
+
                 if ("data".equals(event.event())) {
                     pendingData.add(event.data());
                 } else if ("control".equals(event.event())) {
                     try {
                         Chunk chunk = createChunk(pendingData, event.data());
+
                         if (Objects.nonNull(chunk)) {
                             chunkQueue.offer(new ChunkOrError(chunk));
+
                             if (Objects.nonNull(chunk.nextOffset())) {
                                 currentOffset = chunk.nextOffset();
                             }
+
                             currentCursor = chunk.cursor().orElse(null);
                             upToDate = chunk.upToDate();
+
                             if (chunk.closed()) {
                                 streamClosed = true;
                             }
@@ -169,6 +186,7 @@ public final class SseStreamingReader implements AutoCloseable {
                         chunkQueue.offer(new ChunkOrError(e));
                         break;
                     }
+
                     pendingData.clear();
                 }
             }
@@ -186,26 +204,33 @@ public final class SseStreamingReader implements AutoCloseable {
         if (Objects.isNull(controlJson) || controlJson.trim().isEmpty()) {
             throw new ParseErrorException("Empty control event data");
         }
+
         JsonNode control;
+
         try {
             control = MAPPER.readTree(controlJson);
         } catch (IOException e) {
             throw new ParseErrorException("Malformed control event JSON: " + controlJson, e);
         }
+
         if (!control.isObject()) {
             throw new ParseErrorException("Malformed control event JSON: " + controlJson);
         }
+
         String nextOffset = textOrNull(control, "streamNextOffset");
         String cursor = textOrNull(control, "streamCursor");
         boolean isUpToDate = control.path("upToDate").asBoolean(false);
         boolean isClosed = control.path("streamClosed").asBoolean(false);
         byte[] dataBytes;
+
         if (dataParts.isEmpty()) {
             dataBytes = new byte[0];
         } else if ("base64".equals(encoding)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
+
             for (String part : dataParts) {
                 String cleaned = part.replace("\n", "").replace("\r", "");
+
                 if (!cleaned.isEmpty()) {
                     try {
                         out.write(Base64.getDecoder().decode(cleaned));
@@ -216,17 +241,22 @@ public final class SseStreamingReader implements AutoCloseable {
                     }
                 }
             }
+
             dataBytes = out.toByteArray();
         } else {
             dataBytes = String.join("", dataParts).getBytes(StandardCharsets.UTF_8);
         }
+
         Map<String, String> headers = new HashMap<>();
+
         if (Objects.nonNull(nextOffset)) {
             headers.put(Protocol.H_STREAM_NEXT_OFFSET.toLowerCase(), nextOffset);
         }
+
         if (Objects.nonNull(cursor)) {
             headers.put(Protocol.H_STREAM_CURSOR.toLowerCase(), cursor);
         }
+
         return new Chunk(
             dataBytes,
             Objects.nonNull(nextOffset) ? Offset.of(nextOffset) : null,
@@ -245,10 +275,12 @@ public final class SseStreamingReader implements AutoCloseable {
     private static final class ChunkOrError {
         final Chunk chunk;
         final DurableStreamException error;
+
         ChunkOrError(Chunk chunk) {
             this.chunk = chunk;
             this.error = null;
         }
+
         ChunkOrError(DurableStreamException error) {
             this.chunk = null;
             this.error = error;

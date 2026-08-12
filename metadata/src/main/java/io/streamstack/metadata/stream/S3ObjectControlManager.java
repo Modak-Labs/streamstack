@@ -64,28 +64,37 @@ public final class S3ObjectControlManager {
 
     public long prepareObject(int nodeId, long nodeEpoch, int count, long ttlMs, long nowMs) {
         streamControlManager.nodeEpochCheck(nodeId, nodeEpoch);
+
         if (count <= 0) {
             throw MetadataException.unexpected("prepare count must be positive");
         }
+
         long first = nextAssignedObjectId;
+
         nextAssignedObjectId += count;
         long deadline = nowMs + Math.max(0L, ttlMs);
+
         for (long id = first; id < first + count; id++) {
             preparedObjectDeadlines.put(id, deadline);
         }
+
         return first;
     }
 
     public int expirePreparedObjects(long nowMs) {
         int removed = 0;
+
         Iterator<Map.Entry<Long, Long>> it = preparedObjectDeadlines.entrySet().iterator();
+
         while (it.hasNext()) {
             Map.Entry<Long, Long> entry = it.next();
+
             if (entry.getValue() <= nowMs) {
                 it.remove();
                 removed++;
             }
         }
+
         return removed;
     }
 
@@ -94,26 +103,34 @@ public final class S3ObjectControlManager {
         redundantCommitCheck(request);
         long dataTimeInMs = nowMs;
         boolean compact = !request.getCompactedObjectIds().isEmpty();
+
         if (compact) {
             List<Long> compactedIds = request.getCompactedObjectIds();
+
             for (long id : compactedIds) {
                 OwnedS3Object owned = streamSetObjects.get(id);
+
                 if (Objects.isNull(owned)) {
                     throw MetadataException.unexpected("compacted stream-set object " + id + " not found");
                 }
+
                 dataTimeInMs = Math.min(owned.metadata().dataTimeInMs(), dataTimeInMs);
             }
+
             for (long id : compactedIds) {
                 streamSetObjects.remove(id);
                 markDestroyedObjects.put(id, CompactOperations.DELETE);
             }
         }
+
         if (request.getObjectId() != ObjectUtils.NOOP_OBJECT_ID) {
             commitPrepared(request.getObjectId());
+
             for (ObjectStreamRange range : request.getStreamRanges()) {
                 streamControlManager.advanceEndOffset(
                     range.getStreamId(), range.getStartOffset(), range.getEndOffset(), compact);
             }
+
             S3ObjectMetadata object = new S3ObjectMetadata(
                 request.getObjectId(),
                 S3ObjectType.STREAM_SET,
@@ -124,9 +141,11 @@ public final class S3ObjectControlManager {
                 request.getOrderId());
             streamSetObjects.put(request.getObjectId(), new OwnedS3Object(nodeId, object));
         }
+
         for (StreamObject streamObject : request.getStreamObjects()) {
             commitPrepared(streamObject.getObjectId());
             long streamId = streamObject.getStreamId();
+
             streamControlManager.advanceEndOffset(
                 streamId, streamObject.getStartOffset(), streamObject.getEndOffset(), compact);
             streamObjectList(streamId).add(
@@ -146,12 +165,16 @@ public final class S3ObjectControlManager {
             if (streamSetObjects.containsKey(request.getObjectId())) {
                 throw MetadataException.redundant("object " + request.getObjectId() + " already committed");
             }
+
             return;
         }
+
         List<StreamObject> streamObjectsInRequest = request.getStreamObjects();
+
         if (streamObjectsInRequest.isEmpty()) {
             return;
         }
+
         boolean allCommitted = streamObjectsInRequest.stream().allMatch(
             so -> streamObjectCommitted(so.getStreamId(), so.getObjectId()));
         if (allCommitted) {
@@ -162,30 +185,37 @@ public final class S3ObjectControlManager {
     public void compactStreamObject(int nodeId, long nodeEpoch, CompactStreamObjectRequest request, long nowMs) {
         streamControlManager.nodeEpochCheck(nodeId, nodeEpoch);
         long streamId = request.getStreamId();
+
         if (request.getObjectId() != ObjectUtils.NOOP_OBJECT_ID
             && streamObjectCommitted(streamId, request.getObjectId())) {
             throw MetadataException.redundant(
                 "compact object " + request.getObjectId() + " already committed for stream " + streamId);
         }
+
         var stream = streamControlManager.getStream(streamId);
+
         if (Objects.isNull(stream)) {
             throw MetadataException.streamNotExist(streamId);
         }
+
         if (stream.epoch() != request.getStreamEpoch()) {
             throw MetadataException.expiredEpoch(
                 "stream " + streamId + " epoch " + stream.epoch()
                     + " is not equal to request " + request.getStreamEpoch());
         }
+
         if (stream.endOffset() < request.getEndOffset()) {
             throw MetadataException.unexpected(
                 "stream " + streamId + " end offset " + stream.endOffset()
                     + " is lesser than request " + request.getEndOffset());
         }
+
         if (stream.startOffset() > request.getStartOffset()) {
             throw MetadataException.unexpected(
                 "stream " + streamId + " start offset " + stream.startOffset()
                     + " is greater than request " + request.getStartOffset());
         }
+
         commitPrepared(request.getObjectId());
         streamObjectList(streamId).add(
             new S3ObjectMetadata(
@@ -197,6 +227,7 @@ public final class S3ObjectControlManager {
                 request.getObjectSize(),
                 0));
         HashSet<Long> idSet = new HashSet<>(request.getSourceObjectIds());
+
         streamObjectList(streamId).removeIf(metadata -> idSet.contains(metadata.objectId()));
         markDestroyObjects(request.getSourceObjectIds(), request.getOperations());
     }
@@ -205,16 +236,20 @@ public final class S3ObjectControlManager {
         if (Objects.isNull(ids) || ids.isEmpty()) {
             return;
         }
+
         if (Objects.isNull(ops) || ops.isEmpty()) {
             for (Long id : ids) {
                 markDestroyedObjects.put(id, CompactOperations.DELETE);
             }
+
             return;
         }
+
         if (ops.size() != ids.size()) {
             throw MetadataException.unexpected(
                 "mark destroy ids size " + ids.size() + " does not match operations size " + ops.size());
         }
+
         for (int i = 0; i < ids.size(); i++) {
             markDestroyedObjects.put(ids.get(i), ops.get(i));
         }
@@ -222,12 +257,15 @@ public final class S3ObjectControlManager {
 
     public Map<Long, CompactOperations> peekDestroyedObjects(int limit) {
         Map<Long, CompactOperations> result = new LinkedHashMap<>();
+
         for (Map.Entry<Long, CompactOperations> entry : markDestroyedObjects.entrySet()) {
             if (result.size() >= limit) {
                 break;
             }
+
             result.put(entry.getKey(), entry.getValue());
         }
+
         return result;
     }
 
@@ -239,6 +277,7 @@ public final class S3ObjectControlManager {
 
     public void onStreamDeleted(long streamId) {
         List<S3ObjectMetadata> objects = streamObjects.remove(streamId);
+
         if (Objects.nonNull(objects)) {
             for (S3ObjectMetadata metadata : objects) {
                 markDestroyedObjects.put(metadata.objectId(), CompactOperations.DELETE);
@@ -255,9 +294,11 @@ public final class S3ObjectControlManager {
             .filter(o -> matchesRange(o, streamId, startOffset, endOffset))
             .collect(Collectors.toList());
         List<S3ObjectMetadata> result = new ArrayList<>();
+
         result.addAll(streamSetObjectList);
         result.addAll(streamObjectList);
         result.sort((o1, o2) -> Long.compare(rangeStart(o1, streamId), rangeStart(o2, streamId)));
+
         return result.stream().limit(limit).collect(Collectors.toList());
     }
 
@@ -279,22 +320,27 @@ public final class S3ObjectControlManager {
         if (streamSetObjects.containsKey(objectId)) {
             return true;
         }
+
         if (preparedObjectDeadlines.containsKey(objectId)) {
             return true;
         }
+
         for (List<S3ObjectMetadata> list : streamObjects.values()) {
             if (list.stream().anyMatch(m -> m.objectId() == objectId)) {
                 return true;
             }
         }
+
         return false;
     }
 
     public int getObjectsCount() {
         int count = streamSetObjects.size();
+
         for (List<S3ObjectMetadata> list : streamObjects.values()) {
             count += list.size();
         }
+
         return count;
     }
 
@@ -317,9 +363,11 @@ public final class S3ObjectControlManager {
 
     private boolean streamObjectCommitted(long streamId, long objectId) {
         List<S3ObjectMetadata> list = streamObjects.get(streamId);
+
         if (Objects.isNull(list)) {
             return false;
         }
+
         return list.stream().anyMatch(m -> m.objectId() == objectId);
     }
 
@@ -357,9 +405,11 @@ public final class S3ObjectControlManager {
             this.nodeId = nodeId;
             this.metadata = metadata;
         }
+
         public int nodeId() {
             return nodeId;
         }
+
         public S3ObjectMetadata metadata() {
             return metadata;
         }

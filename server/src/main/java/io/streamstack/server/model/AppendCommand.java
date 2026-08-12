@@ -15,6 +15,7 @@ public record AppendCommand(
     public AppendCommand {
         Objects.requireNonNull(name, "name");
         payloads = Objects.isNull(payloads) ? List.of() : List.copyOf(payloads);
+
         if (Objects.nonNull(streamSeq) && streamSeq.isEmpty()) {
             streamSeq = null;
         }
@@ -38,19 +39,25 @@ public record AppendCommand(
         if (payloads.isEmpty()) {
             return new byte[0];
         }
+
         if (payloads.size() == 1) {
             return payloads.get(0);
         }
+
         int total = 0;
+
         for (byte[] p : payloads) {
             total += p.length;
         }
+
         byte[] out = new byte[total];
         int pos = 0;
+
         for (byte[] p : payloads) {
             System.arraycopy(p, 0, out, pos, p.length);
             pos += p.length;
         }
+
         return out;
     }
 }

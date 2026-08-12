@@ -36,10 +36,12 @@ public final class S2 implements AutoCloseable {
 
     public ListBasinsResponse listBasins(String prefix, String startAfter, Integer limit) {
         StringBuilder query = new StringBuilder();
+
         HttpTransport.appendParam(query, "prefix", prefix);
         HttpTransport.appendParam(query, "start_after", startAfter);
         HttpTransport.appendParam(query, "limit", limit);
         String path = "/v1/basins" + (query.isEmpty() ? "" : "?" + query);
+
         return transport.execute(transport.request(path).GET(), ListBasinsResponse.class, 200);
     }
 
@@ -50,21 +52,27 @@ public final class S2 implements AutoCloseable {
     public BasinResponse createBasin(String name, JsonNode config, String requestToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("basin", name);
+
         if (Objects.nonNull(config)) {
             body.put("config", config);
         }
+
         var builder = transport.request("/v1/basins").POST(transport.jsonBody(body));
+
         if (Objects.nonNull(requestToken)) {
             builder.header("s2-request-token", requestToken);
         }
+
         return transport.execute(builder, BasinResponse.class, 201, 200);
     }
 
     public BasinResponse ensureBasin(String name, JsonNode config) {
         Map<String, Object> body = new LinkedHashMap<>();
+
         if (Objects.nonNull(config)) {
             body.put("config", config);
         }
+
         return transport.execute(
             transport.request("/v1/basins/" + HttpTransport.encodePath(name)).PUT(transport.jsonBody(body)),
             BasinResponse.class,
@@ -105,18 +113,22 @@ public final class S2 implements AutoCloseable {
         private Builder(String endpoint) {
             this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         }
+
         public Builder format(Format format) {
             this.format = format;
             return this;
         }
+
         public Builder httpClient(HttpClient httpClient) {
             this.httpClient = httpClient;
             return this;
         }
+
         public Builder retryPolicy(RetryPolicy retryPolicy) {
             this.retryPolicy = retryPolicy;
             return this;
         }
+
         public S2 build() {
             boolean owns = Objects.isNull(httpClient);
             HttpClient client = Objects.nonNull(httpClient)

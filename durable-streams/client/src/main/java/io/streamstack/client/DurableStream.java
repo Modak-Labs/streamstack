@@ -61,9 +61,12 @@ public final class DurableStream implements AutoCloseable {
         } else {
             this.ownedExecutor = Executors.newCachedThreadPool(r -> {
                 Thread t = new Thread(r, "durable-streams-http");
+
                 t.setDaemon(true);
+
                 return t;
             });
+
             this.httpClient = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_2)
                 .connectTimeout(Duration.ofSeconds(30))
@@ -71,6 +74,7 @@ public final class DurableStream implements AutoCloseable {
                 .executor(ownedExecutor)
                 .build();
         }
+
         this.retryPolicy = Objects.nonNull(builder.retryPolicy) ? builder.retryPolicy : RetryPolicy.defaults();
         this.defaultHeaders = new HashMap<>(builder.defaultHeaders);
         this.dynamicHeaders = new ConcurrentHashMap<>(builder.dynamicHeaders);
@@ -108,19 +112,24 @@ public final class DurableStream implements AutoCloseable {
         if ((Objects.isNull(request.body()) || request.body().length == 0) && !request.close()) {
             throw new DurableStreamException("Cannot append empty data");
         }
+
         HttpRequest http = buildAppendRequest(url, request);
         boolean producer = Objects.nonNull(request.producerId());
         boolean hadBody = Objects.nonNull(request.body()) && request.body().length > 0;
+
         return executeWithRetry(http, producer, response -> parseAppend(response, url, producer, hadBody));
     }
 
     public CompletableFuture<AppendResponse> appendAsync(String url, byte[] data) {
         try {
             AppendRequest request = new AppendRequest(cachedContentType(url), data, null, null, null, null, false);
+
             if (request.body().length == 0) {
                 return CompletableFuture.failedFuture(new DurableStreamException("Cannot append empty data"));
             }
+
             HttpRequest http = buildAppendRequest(url, request);
+
             return executeWithRetryAsync(http, false,
                 response -> parseAppend(response, url, false, true), 0);
         } catch (Exception e) {
@@ -135,11 +144,14 @@ public final class DurableStream implements AutoCloseable {
 
     public void delete(String url) {
         HttpRequest http = buildDeleteRequest(url);
+
         executeWithRetry(http, true, response -> {
             int status = response.statusCode();
+
             if (status == 200 || status == 204) {
                 return null;
             }
+
             throw ErrorMapper.map(url, response);
         });
     }
@@ -159,6 +171,7 @@ public final class DurableStream implements AutoCloseable {
             null,
             true);
         AppendResponse response = append(url, request);
+
         return new CloseResult(response.nextOffset(), wasClosed);
     }
 
@@ -205,6 +218,7 @@ public final class DurableStream implements AutoCloseable {
     Map<String, String> resolveHeaders() {
         Map<String, String> headers = new HashMap<>(defaultHeaders);
         dynamicHeaders.forEach((name, supplier) -> headers.put(name, supplier.get()));
+
         return headers;
     }
 
@@ -238,6 +252,7 @@ public final class DurableStream implements AutoCloseable {
         boolean close) {
         AppendRequest request = new AppendRequest(contentType, data, null, producerId, epoch, seq, close);
         HttpRequest http = buildAppendRequest(url, request);
+
         return executeWithRetry(http, true,
             response -> parseAppend(response, url, true, Objects.nonNull(data) && data.length > 0));
     }
@@ -250,6 +265,7 @@ public final class DurableStream implements AutoCloseable {
     public void close() {
         if (Objects.nonNull(ownedExecutor)) {
             ownedExecutor.shutdown();
+
             try {
                 if (!ownedExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
                     ownedExecutor.shutdownNow();
@@ -264,41 +280,52 @@ public final class DurableStream implements AutoCloseable {
     private HttpRequest buildCreateRequest(String url, CreateRequest request) {
         byte[] body = request.initialBody();
         HttpRequest.BodyPublisher publisher = HttpRequest.BodyPublishers.noBody();
+
         if (body.length > 0) {
             if (Objects.nonNull(request.contentType()) && request.contentType().toLowerCase().contains("json")) {
                 body = wrapInJsonArray(body);
             }
+
             publisher = HttpRequest.BodyPublishers.ofByteArray(body);
         }
+
         HttpRequest.Builder builder = HttpRequest.newBuilder()
             .uri(URI.create(withParams(url)))
             .method("PUT", publisher)
             .timeout(Duration.ofSeconds(30));
         resolveHeaders().forEach(builder::header);
+
         if (Objects.nonNull(request.contentType())) {
             builder.header(Protocol.H_CONTENT_TYPE, request.contentType());
         }
+
         if (Objects.nonNull(request.ttlSeconds())) {
             builder.header(Protocol.H_STREAM_TTL, Long.toString(request.ttlSeconds()));
         }
+
         if (Objects.nonNull(request.expiresAt())) {
             builder.header(Protocol.H_STREAM_EXPIRES_AT, request.expiresAt().toString());
         }
+
         if (request.closed()) {
             builder.header(Protocol.H_STREAM_CLOSED, Protocol.BOOL_TRUE);
         }
+
         return builder.build();
     }
 
     private HttpRequest buildAppendRequest(String url, AppendRequest request) {
         byte[] body = request.body();
         String contentType = Objects.nonNull(request.contentType()) ? request.contentType() : cachedContentType(url);
+
         if (Objects.isNull(contentType)) {
             contentType = "application/octet-stream";
         }
+
         if (body.length > 0 && contentType.toLowerCase().contains("json") && !looksLikeJsonArray(body)) {
             body = wrapInJsonArray(body);
         }
+
         HttpRequest.Builder builder = HttpRequest.newBuilder()
             .uri(URI.create(withParams(url)))
             .POST(body.length == 0
@@ -307,17 +334,21 @@ public final class DurableStream implements AutoCloseable {
             .timeout(Duration.ofSeconds(30));
         resolveHeaders().forEach(builder::header);
         builder.header(Protocol.H_CONTENT_TYPE, contentType);
+
         if (Objects.nonNull(request.streamSeq())) {
             builder.header(Protocol.H_STREAM_SEQ, request.streamSeq());
         }
+
         if (Objects.nonNull(request.producerId())) {
             builder.header(Protocol.H_PRODUCER_ID, request.producerId());
             builder.header(Protocol.H_PRODUCER_EPOCH, Long.toString(request.producerEpoch()));
             builder.header(Protocol.H_PRODUCER_SEQ, Long.toString(request.producerSeq()));
         }
+
         if (request.close()) {
             builder.header(Protocol.H_STREAM_CLOSED, Protocol.BOOL_TRUE);
         }
+
         return builder.build();
     }
 
@@ -327,6 +358,7 @@ public final class DurableStream implements AutoCloseable {
             .method("HEAD", HttpRequest.BodyPublishers.noBody())
             .timeout(Duration.ofSeconds(30));
         resolveHeaders().forEach(builder::header);
+
         return builder.build();
     }
 
@@ -336,23 +368,30 @@ public final class DurableStream implements AutoCloseable {
             .DELETE()
             .timeout(Duration.ofSeconds(30));
         resolveHeaders().forEach(builder::header);
+
         return builder.build();
     }
 
     private HttpRequest buildReadRequest(String url, ReadRequest request, Duration timeout) {
         List<String> params = new ArrayList<>();
+
         resolveParams().forEach((k, v) -> params.add(encode(k) + "=" + encode(v)));
         Offset offset = Objects.isNull(request.offset()) ? Offset.beginning() : request.offset();
+
         params.add(Protocol.Q_OFFSET + "=" + encode(offset.value()));
+
         if (Objects.nonNull(request.live())) {
             params.add(Protocol.Q_LIVE + "=" + encode(request.live().wire()));
         }
+
         if (Objects.nonNull(request.cursor())) {
             params.add(Protocol.Q_CURSOR + "=" + encode(request.cursor()));
         }
+
         Collections.sort(params);
         String full = url + "?" + String.join("&", params);
         HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(full)).GET();
+
         if (Objects.nonNull(timeout)) {
             builder.timeout(timeout);
         } else if (request.live() == LiveMode.LONG_POLL) {
@@ -360,23 +399,31 @@ public final class DurableStream implements AutoCloseable {
         } else {
             builder.timeout(Duration.ofSeconds(30));
         }
+
         resolveHeaders().forEach(builder::header);
+
         if (request.live() == LiveMode.SSE) {
             builder.header("Accept", Protocol.CT_EVENT_STREAM);
         }
+
         return builder.build();
     }
 
     private HttpRequest buildSseRequest(String url, Offset offset, String cursor) {
         List<String> params = new ArrayList<>();
+
         resolveParams().forEach((k, v) -> params.add(encode(k) + "=" + encode(v)));
+
         if (Objects.nonNull(offset)) {
             params.add(Protocol.Q_OFFSET + "=" + encode(offset.value()));
         }
+
         params.add(Protocol.Q_LIVE + "=" + Protocol.LIVE_SSE);
+
         if (Objects.nonNull(cursor)) {
             params.add(Protocol.Q_CURSOR + "=" + encode(cursor));
         }
+
         Collections.sort(params);
         String full = url + "?" + String.join("&", params);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
@@ -384,11 +431,13 @@ public final class DurableStream implements AutoCloseable {
             .GET()
             .header("Accept", Protocol.CT_EVENT_STREAM);
         resolveHeaders().forEach(builder::header);
+
         return builder.build();
     }
 
     private CreateResponse parseCreate(HttpResponse<byte[]> response, String url, CreateRequest request) {
         int status = response.statusCode();
+
         if (status == 201 || status == 200) {
             String contentType = response.headers().firstValue(Protocol.H_CONTENT_TYPE)
                 .orElse(request.contentType());
@@ -398,12 +447,15 @@ public final class DurableStream implements AutoCloseable {
                 response.headers().firstValue(Protocol.H_STREAM_CLOSED).orElse(null));
             return new CreateResponse(status == 201, contentType, next, closed);
         }
+
         throw ErrorMapper.mapCreate(url, response);
     }
 
     private AppendResponse parseAppend(HttpResponse<byte[]> response, String url, boolean producer, boolean hadBody) {
         int status = response.statusCode();
+
         response.headers().firstValue(Protocol.H_CONTENT_TYPE).ifPresent(ct -> cacheContentType(url, ct));
+
         if (status == 200 || status == 201 || status == 204) {
             Offset next = response.headers().firstValue(Protocol.H_STREAM_NEXT_OFFSET).map(Offset::of).orElse(null);
             boolean closed = Protocol.BOOL_TRUE.equalsIgnoreCase(
@@ -411,8 +463,10 @@ public final class DurableStream implements AutoCloseable {
             Long epoch = response.headers().firstValue(Protocol.H_PRODUCER_EPOCH).map(Long::parseLong).orElse(null);
             Long seq = response.headers().firstValue(Protocol.H_PRODUCER_SEQ).map(Long::parseLong).orElse(null);
             boolean appended = producer ? status != 204 : hadBody;
+
             return new AppendResponse(next, appended, closed, epoch, seq);
         }
+
         throw ErrorMapper.map(url, response);
     }
 
@@ -420,7 +474,9 @@ public final class DurableStream implements AutoCloseable {
         if (response.statusCode() != 200) {
             throw ErrorMapper.map(url, response);
         }
+
         String contentType = response.headers().firstValue(Protocol.H_CONTENT_TYPE).orElse(null);
+
         cacheContentType(url, contentType);
         Long ttl = response.headers().firstValue(Protocol.H_STREAM_TTL).map(Long::parseLong).orElse(null);
         Instant expiresAt = response.headers().firstValue(Protocol.H_STREAM_EXPIRES_AT).map(Instant::parse).orElse(null);
@@ -432,6 +488,7 @@ public final class DurableStream implements AutoCloseable {
 
     private Chunk parseRead(HttpResponse<byte[]> response, String url) {
         int status = response.statusCode();
+
         if (status == 200 || status == 204) {
             response.headers().firstValue(Protocol.H_CONTENT_TYPE).ifPresent(ct -> cacheContentType(url, ct));
             Offset next = response.headers().firstValue(Protocol.H_STREAM_NEXT_OFFSET).map(Offset::of).orElse(null);
@@ -440,20 +497,25 @@ public final class DurableStream implements AutoCloseable {
             boolean closed = Protocol.BOOL_TRUE.equalsIgnoreCase(
                 response.headers().firstValue(Protocol.H_STREAM_CLOSED).orElse(null));
             String cursor = response.headers().firstValue(Protocol.H_STREAM_CURSOR).orElse(null);
+
             Map<String, String> headers = new HashMap<>();
             response.headers().map().forEach((k, v) -> {
                 if (!v.isEmpty()) {
                     headers.put(k.toLowerCase(), v.get(0));
                 }
             });
+
             byte[] body = status == 204 || Objects.isNull(response.body()) ? new byte[0] : response.body();
+
             return new Chunk(body, next, upToDate || status == 204, closed, cursor, status, headers);
         }
+
         throw ErrorMapper.map(url, response);
     }
 
     private <T> T executeWithRetry(HttpRequest request, boolean idempotent, ResponseHandler<T> handler) {
         int attempt = 0;
+
         while (true) {
             try {
                 HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
@@ -465,6 +527,7 @@ public final class DurableStream implements AutoCloseable {
                     sleep(retryPolicy.delay(attempt), e);
                     continue;
                 }
+
                 throw e;
             } catch (IOException e) {
                 if (idempotent && attempt < retryPolicy.maxRetries()) {
@@ -472,6 +535,7 @@ public final class DurableStream implements AutoCloseable {
                     sleep(retryPolicy.delay(attempt), new DurableStreamException(e.getMessage(), e));
                     continue;
                 }
+
                 throw new DurableStreamException(e.getMessage(), e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -495,19 +559,23 @@ public final class DurableStream implements AutoCloseable {
                             && retryPolicy.shouldRetry(e.statusCode().get(), attempt)) {
                             return retryAsync(request, idempotent, handler, attempt + 1);
                         }
+
                         return CompletableFuture.<T>failedFuture(e);
                     }
                 }
+
                 Throwable cause = error instanceof CompletionException && Objects.nonNull(error.getCause())
                     ? error.getCause()
                     : error;
                 if (idempotent && cause instanceof IOException && attempt < retryPolicy.maxRetries()) {
                     return retryAsync(request, idempotent, handler, attempt + 1);
                 }
+
                 return CompletableFuture.<T>failedFuture(cause instanceof DurableStreamException dse
                     ? dse
                     : new DurableStreamException(cause.getMessage(), cause));
             })
+
             .thenCompose(Function.identity());
     }
 
@@ -533,18 +601,23 @@ public final class DurableStream implements AutoCloseable {
 
     private String withParams(String url) {
         Map<String, String> params = resolveParams();
+
         if (params.isEmpty()) {
             return url;
         }
+
         List<String> parts = new ArrayList<>();
+
         params.forEach((k, v) -> parts.add(encode(k) + "=" + encode(v)));
         Collections.sort(parts);
+
         return url + "?" + String.join("&", parts);
     }
 
     private Map<String, String> resolveParams() {
         Map<String, String> params = new HashMap<>(defaultParams);
         dynamicParams.forEach((name, supplier) -> params.put(name, supplier.get()));
+
         return params;
     }
 
@@ -553,8 +626,10 @@ public final class DurableStream implements AutoCloseable {
             if (b == ' ' || b == '\n' || b == '\r' || b == '\t') {
                 continue;
             }
+
             return b == '[';
         }
+
         return false;
     }
 
@@ -562,9 +637,11 @@ public final class DurableStream implements AutoCloseable {
         byte[] prefix = {'['};
         byte[] suffix = {']'};
         byte[] result = new byte[prefix.length + data.length + suffix.length];
+
         System.arraycopy(prefix, 0, result, 0, prefix.length);
         System.arraycopy(data, 0, result, prefix.length, data.length);
         System.arraycopy(suffix, 0, result, prefix.length + data.length, suffix.length);
+
         return result;
     }
 
@@ -578,6 +655,7 @@ public final class DurableStream implements AutoCloseable {
 
     @FunctionalInterface
     private interface ResponseHandler<T> {
+
         T handle(HttpResponse<byte[]> response);
     }
 
@@ -592,26 +670,32 @@ public final class DurableStream implements AutoCloseable {
             this.httpClient = httpClient;
             return this;
         }
+
         public Builder retryPolicy(RetryPolicy retryPolicy) {
             this.retryPolicy = retryPolicy;
             return this;
         }
+
         public Builder header(String name, String value) {
             defaultHeaders.put(name, value);
             return this;
         }
+
         public Builder header(String name, Supplier<String> supplier) {
             dynamicHeaders.put(name, supplier);
             return this;
         }
+
         public Builder param(String name, String value) {
             defaultParams.put(name, value);
             return this;
         }
+
         public Builder param(String name, Supplier<String> supplier) {
             dynamicParams.put(name, supplier);
             return this;
         }
+
         public DurableStream build() {
             return new DurableStream(this);
         }

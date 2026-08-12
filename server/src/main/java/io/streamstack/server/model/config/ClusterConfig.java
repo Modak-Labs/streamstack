@@ -56,21 +56,27 @@ public final class ClusterConfig {
         if (Objects.isNull(global.clusterName) || global.clusterName.isBlank()) {
             throw new IllegalArgumentException("global.clusterName is required");
         }
+
         if (Objects.isNull(global.storage) || global.storage.isBlank()) {
             throw new IllegalArgumentException("global.storage is required");
         }
+
         if (nodes.isEmpty()) {
             throw new IllegalArgumentException("nodes must not be empty");
         }
+
         for (Node node : nodes) {
             if (Objects.isNull(node.host) || node.host.isBlank()) {
                 throw new IllegalArgumentException("node.host is required");
             }
+
             if (node.nodeId <= 0) {
                 throw new IllegalArgumentException("node.nodeId must be > 0");
             }
         }
+
         long distinct = nodes.stream().map(n -> n.nodeId).distinct().count();
+
         if (distinct != nodes.size()) {
             throw new IllegalArgumentException("duplicate nodeId in topology");
         }
@@ -79,12 +85,16 @@ public final class ClusterConfig {
     public static ClusterConfig load(Path path) {
         Objects.requireNonNull(path, "path");
         ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+
         try (Reader reader = Files.newBufferedReader(path)) {
             ClusterConfig topology = mapper.readValue(reader, ClusterConfig.class);
+
             if (Objects.isNull(topology)) {
                 throw new IllegalArgumentException("empty topology: " + path);
             }
+
             topology.validate();
+
             return topology;
         } catch (IOException e) {
             throw new IllegalArgumentException("failed to load topology: " + path, e);
@@ -101,45 +111,59 @@ public final class ClusterConfig {
         public String getClusterName() {
             return clusterName;
         }
+
         public void setClusterName(String clusterName) {
             this.clusterName = clusterName;
         }
+
         public String getStorage() {
             return storage;
         }
+
         public void setStorage(String storage) {
             this.storage = storage;
         }
+
         public String getWal() {
             return wal;
         }
+
         public void setWal(String wal) {
             this.wal = wal;
         }
+
         public Map<String, Object> getConfig() {
             return config;
         }
+
         public void setConfig(Map<String, Object> config) {
             this.config = Objects.nonNull(config) ? config : new LinkedHashMap<>();
         }
+
         public List<Env> getEnvs() {
             return envs;
         }
+
         public void setEnvs(List<Env> envs) {
             this.envs = Objects.nonNull(envs) ? envs : new ArrayList<>();
         }
+
         public String clusterName() {
             return clusterName;
         }
+
         public String storage() {
             return storage;
         }
+
         public String wal() {
             return wal;
         }
+
         public Map<String, Object> config() {
             return config;
         }
+
         public List<Env> envs() {
             return envs;
         }
@@ -152,18 +176,23 @@ public final class ClusterConfig {
         public String getName() {
             return name;
         }
+
         public void setName(String name) {
             this.name = name;
         }
+
         public String getValue() {
             return value;
         }
+
         public void setValue(String value) {
             this.value = value;
         }
+
         public String name() {
             return name;
         }
+
         public String value() {
             return value;
         }
@@ -179,45 +208,59 @@ public final class ClusterConfig {
         public String getHost() {
             return host;
         }
+
         public void setHost(String host) {
             this.host = host;
         }
+
         public int getNodeId() {
             return nodeId;
         }
+
         public void setNodeId(int nodeId) {
             this.nodeId = nodeId;
         }
+
         public Integer getHttpPort() {
             return httpPort;
         }
+
         public void setHttpPort(Integer httpPort) {
             this.httpPort = httpPort;
         }
+
         public Integer getRaftPort() {
             return raftPort;
         }
+
         public void setRaftPort(Integer raftPort) {
             this.raftPort = raftPort;
         }
+
         public String getDataDir() {
             return dataDir;
         }
+
         public void setDataDir(String dataDir) {
             this.dataDir = dataDir;
         }
+
         public String host() {
             return host;
         }
+
         public int nodeId() {
             return nodeId;
         }
+
         public Integer httpPort() {
             return httpPort;
         }
+
         public Integer raftPort() {
             return raftPort;
         }
+
         public String dataDir() {
             return dataDir;
         }

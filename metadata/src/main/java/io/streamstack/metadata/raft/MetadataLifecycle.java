@@ -40,11 +40,15 @@ public final class MetadataLifecycle implements AutoCloseable {
         if (!leader.compareAndSet(false, true)) {
             return;
         }
+
         scheduler = new ScheduledThreadPoolExecutor(2, r -> {
             Thread t = new Thread(r, "metadata-lifecycle-" + client.node().nodeId());
+
             t.setDaemon(true);
+
             return t;
         });
+
         expireFuture = scheduler.scheduleWithFixedDelay(this::expirePrepared, 1, 1, TimeUnit.SECONDS);
         cleanFuture = scheduler.scheduleWithFixedDelay(this::cleanObjects, 1, 1, TimeUnit.SECONDS);
     }
@@ -53,10 +57,12 @@ public final class MetadataLifecycle implements AutoCloseable {
         if (!leader.compareAndSet(true, false)) {
             return;
         }
+
         cancel(expireFuture);
         cancel(cleanFuture);
         expireFuture = null;
         cleanFuture = null;
+
         if (Objects.nonNull(scheduler)) {
             scheduler.shutdownNow();
             scheduler = null;
@@ -67,6 +73,7 @@ public final class MetadataLifecycle implements AutoCloseable {
         if (!leader.get() || !client.node().isLeader()) {
             return;
         }
+
         client.propose(new MetadataCommand.ExpirePreparedObjects(System.currentTimeMillis()))
             .whenComplete((r, e) -> {
                 if (Objects.nonNull(e)) {
@@ -79,6 +86,7 @@ public final class MetadataLifecycle implements AutoCloseable {
         if (!leader.get() || !client.node().isLeader()) {
             return;
         }
+
         try {
             objectCleaner.clean(ObjectCleaner.MAX_DELETE_BATCH_COUNT);
         } catch (Throwable t) {

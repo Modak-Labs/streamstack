@@ -26,24 +26,32 @@ public final class RaftOwnershipService implements OwnershipService {
     public Owner ownerOf(String name) throws StreamServiceException {
         try {
             OptionalLong streamId = streamService.lookupStreamId(name);
+
             if (streamId.isEmpty()) {
                 return Owner.local(OptionalLong.empty());
             }
+
             long id = streamId.getAsLong();
+
             return metadataNode.client().readIndex(() -> {
                 List<StreamMetadata> streams =
                     metadataNode.stateMachine().streamControlManager().getStreams(List.of(id));
                 if (streams.isEmpty() || streams.get(0).state() != StreamState.OPENED) {
                     return Owner.local(OptionalLong.of(id));
                 }
+
                 int ownerId = streams.get(0).nodeId();
+
                 if (ownerId == metadataNode.nodeId()) {
                     return Owner.local(OptionalLong.of(id));
                 }
+
                 String address = metadataNode.stateMachine().streamControlManager().getNodeAddress(ownerId);
+
                 if (Objects.isNull(address) || address.isEmpty()) {
                     return Owner.local(OptionalLong.of(id));
                 }
+
                 return Owner.remote(id, ownerId, address);
             }).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
         } catch (StreamServiceException e) {

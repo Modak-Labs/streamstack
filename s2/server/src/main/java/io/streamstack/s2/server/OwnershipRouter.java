@@ -27,30 +27,38 @@ public final class OwnershipRouter {
                 local.handle(ctx);
                 return;
             }
+
             String basin = ctx.header(Protocol.H_BASIN);
             String stream = ctx.pathParamMap().get("stream");
+
             if (Objects.isNull(basin) || Objects.isNull(stream)) {
                 local.handle(ctx);
                 return;
             }
+
             Owner owner = ownership.ownerOf(BasinRegistry.coreStreamName(basin, stream));
             NodeMeta localNode = ownership.localNode();
+
             if (owner.local()
                 || Objects.isNull(owner.ownerAdvertisedAddress())
                 || owner.ownerAdvertisedAddress().equals(localNode.advertisedAddress())) {
                 local.handle(ctx);
                 return;
             }
+
             redirect(ctx, owner.ownerAdvertisedAddress());
         };
     }
 
     private static void redirect(Context ctx, String address) {
         String location = address.endsWith("/") ? address.substring(0, address.length() - 1) : address;
+
         location += ctx.path().startsWith("/") ? ctx.path() : "/" + ctx.path();
+
         if (Objects.nonNull(ctx.queryString()) && !ctx.queryString().isEmpty()) {
             location += "?" + ctx.queryString();
         }
+
         ctx.status(307);
         ctx.header("Location", location);
         ctx.header(Protocol.H_CACHE_CONTROL, "no-store");

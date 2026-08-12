@@ -40,6 +40,7 @@ public final class HttpTransport implements AutoCloseable {
         if (format == Format.BASE64) {
             builder.header(Protocol.H_FORMAT, "base64");
         }
+
         return builder;
     }
 
@@ -59,21 +60,26 @@ public final class HttpTransport implements AutoCloseable {
         HttpRequest request = builder.build();
         boolean idempotent = !"POST".equals(request.method());
         int attempt = 0;
+
         while (true) {
             try {
                 HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+
                 for (int status : expected) {
                     if (response.statusCode() == status) {
                         if (type == Void.class || response.body().length == 0) {
                             return null;
                         }
+
                         return S2Json.read(response.body(), type, format);
                     }
                 }
+
                 if (idempotent && retryPolicy.retryable(response.statusCode()) && attempt < retryPolicy.maxRetries()) {
                     sleep(retryPolicy.delayForAttempt(++attempt));
                     continue;
                 }
+
                 throw ErrorMapper.map(response.statusCode(), response.body());
             } catch (S2Exception e) {
                 throw e;
@@ -88,8 +94,10 @@ public final class HttpTransport implements AutoCloseable {
                         Thread.currentThread().interrupt();
                         throw S2Exception.unavailable(ie.getMessage());
                     }
+
                     continue;
                 }
+
                 throw S2Exception.unavailable(e.getMessage());
             }
         }
@@ -102,7 +110,9 @@ public final class HttpTransport implements AutoCloseable {
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 return response.body();
             }
+
             byte[] body = response.body().readAllBytes();
+
             throw ErrorMapper.map(response.statusCode(), body);
         } catch (S2Exception e) {
             throw e;
@@ -123,9 +133,11 @@ public final class HttpTransport implements AutoCloseable {
         if (Objects.isNull(value)) {
             return;
         }
+
         if (!query.isEmpty()) {
             query.append('&');
         }
+
         query.append(name).append('=').append(encode(String.valueOf(value)));
     }
 

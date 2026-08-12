@@ -57,6 +57,7 @@ public class StreamStackNodeServiceTest {
             assertTrue(appended.applied());
             assertFalse(appended.closed());
             ReadResult batch = services.read().read("/streams/demo", OffsetToken.beginning(), 1024, 0);
+
             assertEquals(1, batch.records().size());
             assertEquals("hello", new String(batch.records().get(0).payload(), StandardCharsets.UTF_8));
             assertTrue(batch.upToDate());
@@ -83,6 +84,7 @@ public class StreamStackNodeServiceTest {
         assertTrue(appended.applied());
         assertEquals(3, appended.nextOffset().recordOffset());
         ReadResult all = services.read().read("/streams/batch", OffsetToken.beginning(), 1024, 0);
+
         assertEquals(3, all.records().size());
         assertEquals("a", new String(all.records().get(0).payload(), StandardCharsets.UTF_8));
         assertEquals("bb", new String(all.records().get(1).payload(), StandardCharsets.UTF_8));
@@ -96,10 +98,12 @@ public class StreamStackNodeServiceTest {
         assertEquals(2, tail.records().size());
         assertEquals("bb", new String(tail.records().get(0).payload(), StandardCharsets.UTF_8));
         ReadResult limited = services.read().read("/streams/batch", OffsetToken.beginning(), 1024, 2);
+
         assertEquals(2, limited.records().size());
         assertEquals(2, limited.nextOffset().recordOffset());
         assertFalse(limited.upToDate());
         long effective = services.lifecycle().trim("/streams/batch", 2);
+
         assertTrue(effective >= 0 && effective <= 2, "effective trim " + effective);
         assertEquals(effective, services.lifecycle().head("/streams/batch")
             .orElseThrow().startOffset().recordOffset());

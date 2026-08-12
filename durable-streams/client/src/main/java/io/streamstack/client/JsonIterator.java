@@ -37,12 +37,16 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
         if (hasNextComputed) {
             return Objects.nonNull(nextBatch);
         }
+
         hasNextComputed = true;
+
         if (!chunkIterator.hasNext()) {
             nextBatch = null;
             return false;
         }
+
         nextBatch = parseChunk(chunkIterator.next());
+
         return true;
     }
 
@@ -51,17 +55,22 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
         if (!hasNext()) {
             throw new NoSuchElementException();
         }
+
         hasNextComputed = false;
         JsonBatch<T> result = nextBatch;
+
         nextBatch = null;
+
         return result;
     }
 
     public JsonBatch<T> poll(Duration timeout) {
         Chunk chunk = chunkIterator.poll(timeout);
+
         if (Objects.isNull(chunk)) {
             return null;
         }
+
         return parseChunk(chunk);
     }
 
@@ -97,6 +106,7 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
     private JsonBatch<T> parseChunk(Chunk chunk) {
         String json = chunk.dataAsString();
         List<T> items;
+
         if (Objects.isNull(json) || json.isEmpty()) {
             items = List.of();
         } else {
@@ -106,6 +116,7 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
                 throw new ParseErrorException("Failed to parse JSON: " + e.getMessage(), e);
             }
         }
+
         return new JsonBatch<>(items, chunk.nextOffset(), chunk.upToDate(), chunk.cursor().orElse(null));
     }
 
@@ -115,21 +126,26 @@ public final class JsonIterator<T> implements Iterator<JsonBatch<T>>, Iterable<J
         FlattenedIterator(JsonIterator<T> jsonIterator) {
             this.jsonIterator = jsonIterator;
         }
+
         @Override
         public boolean hasNext() {
             while (Objects.isNull(currentBatch) || !currentBatch.hasNext()) {
                 if (!jsonIterator.hasNext()) {
                     return false;
                 }
+
                 currentBatch = jsonIterator.next().iterator();
             }
+
             return true;
         }
+
         @Override
         public T next() {
             if (!hasNext()) {
                 throw new NoSuchElementException();
             }
+
             return currentBatch.next();
         }
     }

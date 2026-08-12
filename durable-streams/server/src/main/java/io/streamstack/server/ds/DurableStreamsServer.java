@@ -31,10 +31,12 @@ public final class DurableStreamsServer implements AutoCloseable {
             Duration.ofSeconds(config.sseMaxDurationSec()),
             config.maxChunkSize());
         OwnershipRouter router = new OwnershipRouter(node.service(), handler, config.routingMode());
+
         this.app = Javalin.create(cfg -> {
             cfg.showJavalinBanner = false;
             cfg.useVirtualThreads = true;
         });
+
         app.get("/*", router::handle);
         app.post("/*", router::handle);
         app.put("/*", router::handle);
@@ -47,9 +49,11 @@ public final class DurableStreamsServer implements AutoCloseable {
         if (!started.compareAndSet(false, true)) {
             return;
         }
+
         node.start();
         app.start(config.httpHost(), config.httpPort());
         boolean virtualThreads = LoomUtil.INSTANCE.getLoomAvailable();
+
         LOGGER.info(
             "streamstack durable-streams server started nodeId={} http={}:{} raft={}:{} storage={} wal={} httpThreads={}",
             config.nodeId(), config.httpHost(), config.httpPort(), config.raftHost(), config.raftPort(),
@@ -76,6 +80,7 @@ public final class DurableStreamsServer implements AutoCloseable {
             app.stop();
         } catch (Exception ignored) {
         }
+
         node.close();
         started.set(false);
     }
@@ -83,6 +88,7 @@ public final class DurableStreamsServer implements AutoCloseable {
     public static void main(String[] args) throws Exception {
         ServerConfig config = ServerConfig.fromArgs(args);
         DurableStreamsServer server = new DurableStreamsServer(config);
+
         Runtime.getRuntime().addShutdownHook(new Thread(server::close));
         server.start();
     }

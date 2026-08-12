@@ -32,13 +32,16 @@ public class MetadataCommandCodecTest {
         assertRoundTrip(new MetadataCommand.PutKVIfAbsent("path/b", new byte[] {4, 5}));
         assertRoundTrip(new MetadataCommand.DeleteKV("path/c"));
         CommitStreamSetObjectRequest commit = new CommitStreamSetObjectRequest();
+
         commit.setObjectId(11);
         commit.setOrderId(11);
         commit.setObjectSize(128);
         commit.setAttributes(1);
         ObjectStreamRange range = new ObjectStreamRange(3, 1, 0, 10, 128);
+
         commit.setStreamRanges(List.of(range));
         StreamObject streamObject = new StreamObject();
+
         streamObject.setObjectId(12);
         streamObject.setObjectSize(64);
         streamObject.setStreamId(3);
@@ -55,12 +58,14 @@ public class MetadataCommandCodecTest {
 
     private static void assertRoundTrip(MetadataCommand command) {
         MetadataCommand decoded = MetadataCommandCodec.decode(MetadataCommandCodec.encode(command));
+
         assertEquals(command, decoded);
     }
 
     private static void assertStableEncoding(MetadataCommand command) {
         byte[] encoded = MetadataCommandCodec.encode(command);
         byte[] reencoded = MetadataCommandCodec.encode(MetadataCommandCodec.decode(encoded));
+
         assertArrayEquals(encoded, reencoded);
     }
 }

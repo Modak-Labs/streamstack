@@ -46,6 +46,7 @@ public final class RetryPolicy {
         if (attempt >= maxRetries) {
             return false;
         }
+
         return retryableStatuses.contains(statusCode);
     }
 
@@ -53,7 +54,9 @@ public final class RetryPolicy {
         if (attempt <= 1) {
             return initialDelay;
         }
+
         double delay = initialDelay.toMillis() * Math.pow(multiplier, attempt - 1);
+
         return Duration.ofMillis(Math.min((long) delay, maxDelay.toMillis()));
     }
 
@@ -67,22 +70,27 @@ public final class RetryPolicy {
             this.maxRetries = maxRetries;
             return this;
         }
+
         public Builder initialDelay(Duration initialDelay) {
             this.initialDelay = initialDelay;
             return this;
         }
+
         public Builder maxDelay(Duration maxDelay) {
             this.maxDelay = maxDelay;
             return this;
         }
+
         public Builder multiplier(double multiplier) {
             this.multiplier = multiplier;
             return this;
         }
+
         public Builder retryableStatuses(Set<Integer> statuses) {
             this.retryableStatuses = statuses;
             return this;
         }
+
         public RetryPolicy build() {
             return new RetryPolicy(maxRetries, initialDelay, maxDelay, multiplier, retryableStatuses);
         }

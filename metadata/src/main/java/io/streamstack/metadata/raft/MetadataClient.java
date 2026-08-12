@@ -55,7 +55,9 @@ public final class MetadataClient implements AutoCloseable {
         RouteTable.getInstance().updateConfiguration(groupId, configuration);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "metadata-client-" + node.nodeId());
+
             t.setDaemon(true);
+
             return t;
         });
     }
@@ -66,7 +68,9 @@ public final class MetadataClient implements AutoCloseable {
 
     public CompletableFuture<Object> propose(MetadataCommand command) {
         CompletableFuture<Object> future = new CompletableFuture<>();
+
         attempt(command, 0, future);
+
         return future;
     }
 
@@ -77,30 +81,40 @@ public final class MetadataClient implements AutoCloseable {
                     future.complete(result);
                     return;
                 }
+
                 Throwable cause = unwrap(error);
+
                 if (cause instanceof MetadataException metadataException) {
                     future.completeExceptionally(MetadataException.toStreamClientException(metadataException));
                 } else {
                     retryOrFail(command, attempt, future, cause);
                 }
             });
+
             return;
         }
+
         PeerId leader = discoverLeader();
+
         if (Objects.isNull(leader)) {
             retryOrFail(command, attempt, future,
                 new MetadataNode.NotLeaderException(null));
             return;
         }
+
         MetadataCommandRequest request = new MetadataCommandRequest(MetadataCommandCodec.encode(command));
+
         try {
             cliClientService.getRpcClient().invokeAsync(leader.getEndpoint(), request, (result, err) -> {
                 if (Objects.nonNull(err)) {
                     RouteTable.getInstance().updateLeader(groupId, (PeerId) null);
                     retryOrFail(command, attempt, future, err);
+
                     return;
                 }
+
                 MetadataCommandResponse response = (MetadataCommandResponse) result;
+
                 switch (response.getStatus()) {
                     case MetadataCommandResponse.OK ->
                         future.complete(MetadataResultCodec.decode(response.getResult()));
@@ -110,6 +124,7 @@ public final class MetadataClient implements AutoCloseable {
                         } else {
                             RouteTable.getInstance().updateLeader(groupId, (PeerId) null);
                         }
+
                         retryOrFail(command, attempt, future,
                             new MetadataNode.NotLeaderException(response.getLeaderId()));
                     }
@@ -132,23 +147,28 @@ public final class MetadataClient implements AutoCloseable {
             future.completeExceptionally(cause);
             return;
         }
+
         scheduler.schedule(() -> attempt(command, attempt + 1, future), retrySleepMs, TimeUnit.MILLISECONDS);
     }
 
     private PeerId discoverLeader() {
         RouteTable routeTable = RouteTable.getInstance();
         PeerId leader = routeTable.selectLeader(groupId);
+
         if (Objects.nonNull(leader)) {
             return leader;
         }
+
         try {
             Status status = routeTable.refreshLeader(cliClientService, groupId, (int) rpcTimeoutMs);
+
             if (!status.isOk()) {
                 LOGGER.debug("refresh leader failed: {}", status.getErrorMsg());
             }
         } catch (Exception e) {
             LOGGER.debug("refresh leader failed", e);
         }
+
         return routeTable.selectLeader(groupId);
     }
 
@@ -161,6 +181,7 @@ public final class MetadataClient implements AutoCloseable {
 
     public <T> CompletableFuture<T> readIndex(Supplier<T> read) {
         CompletableFuture<T> future = new CompletableFuture<>();
+
         node.raftNode().readIndex(null, new ReadIndexClosure() {
             @Override
             public void run(Status status, long index, byte[] reqCtx) {
@@ -168,15 +189,18 @@ public final class MetadataClient implements AutoCloseable {
                     future.completeExceptionally(new IllegalStateException(status.getErrorMsg()));
                     return;
                 }
+
                 node.stateMachine().awaitApplied(index).whenCompleteAsync((ignored, error) -> {
                     if (Objects.nonNull(error)) {
                         future.completeExceptionally(unwrap(error));
                         return;
                     }
+
                     try {
                         future.complete(node.stateMachine().read(read));
                     } catch (Throwable t) {
                         Throwable cause = unwrap(t);
+
                         if (cause instanceof MetadataException metadataException) {
                             future.completeExceptionally(MetadataException.toStreamClientException(metadataException));
                         } else {
@@ -186,6 +210,7 @@ public final class MetadataClient implements AutoCloseable {
                 }, scheduler);
             }
         });
+
         return future;
     }
 
@@ -197,9 +222,11 @@ public final class MetadataClient implements AutoCloseable {
 
     private static Throwable unwrap(Throwable t) {
         Throwable cur = t;
+
         while (cur instanceof CompletionException && Objects.nonNull(cur.getCause())) {
             cur = cur.getCause();
         }
+
         return cur;
     }
 }

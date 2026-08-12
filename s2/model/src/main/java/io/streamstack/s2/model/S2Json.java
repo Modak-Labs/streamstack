@@ -62,6 +62,7 @@ public final class S2Json {
         public void serialize(byte[] value, JsonGenerator gen, SerializerProvider provider) throws IOException {
             gen.writeString(format(provider.getAttribute(FORMAT_ATTRIBUTE)).encode(value));
         }
+
         @Override
         public boolean isEmpty(SerializerProvider provider, byte[] value) {
             return Objects.isNull(value) || value.length == 0;
@@ -79,6 +80,7 @@ public final class S2Json {
         @Override
         public void serialize(RecordHeader value, JsonGenerator gen, SerializerProvider provider) throws IOException {
             Format format = format(provider.getAttribute(FORMAT_ATTRIBUTE));
+
             gen.writeStartArray();
             gen.writeString(format.encode(value.name()));
             gen.writeString(format.encode(value.value()));
@@ -92,12 +94,15 @@ public final class S2Json {
             if (parser.currentToken() != JsonToken.START_ARRAY) {
                 throw new IOException("each header must be a [name, value] pair");
             }
+
             Format format = format(context.getAttribute(FORMAT_ATTRIBUTE));
             String name = parser.nextTextValue();
             String value = parser.nextTextValue();
+
             if (Objects.isNull(name) || Objects.isNull(value) || parser.nextToken() != JsonToken.END_ARRAY) {
                 throw new IOException("each header must be a [name, value] pair");
             }
+
             return new RecordHeader(format.decode(name), format.decode(value));
         }
     }

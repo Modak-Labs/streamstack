@@ -26,18 +26,22 @@ public final class MetadataCommandProcessor implements RpcProcessor<MetadataComm
     @Override
     public void handleRequest(RpcContext rpcCtx, MetadataCommandRequest request) {
         MetadataCommand command;
+
         try {
             command = MetadataCommandCodec.decode(request.getCommand());
         } catch (Throwable t) {
             rpcCtx.sendResponse(MetadataCommandResponse.raftError("invalid command: " + t.getMessage()));
             return;
         }
+
         node.propose(command).whenComplete((result, error) -> {
             if (Objects.isNull(error)) {
                 rpcCtx.sendResponse(MetadataCommandResponse.ok(MetadataResultCodec.encode(result)));
                 return;
             }
+
             Throwable cause = unwrap(error);
+
             if (cause instanceof MetadataNode.NotLeaderException notLeader) {
                 rpcCtx.sendResponse(MetadataCommandResponse.notLeader(notLeader.leaderId()));
             } else if (cause instanceof MetadataException metadataException) {
@@ -56,9 +60,11 @@ public final class MetadataCommandProcessor implements RpcProcessor<MetadataComm
 
     private static Throwable unwrap(Throwable error) {
         Throwable cause = error;
+
         while (cause instanceof CompletionException && Objects.nonNull(cause.getCause())) {
             cause = cause.getCause();
         }
+
         return cause;
     }
 }

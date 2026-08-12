@@ -52,11 +52,14 @@ public final class StreamControlManager {
 
     public void registerNode(int nodeId, long nodeEpoch, String httpAddress) {
         Long current = nodeEpochs.get(nodeId);
+
         if (Objects.nonNull(current) && current > nodeEpoch) {
             throw MetadataException.nodeEpochMismatch(
                 "node " + nodeId + " epoch " + current + " fences register with epoch " + nodeEpoch);
         }
+
         nodeEpochs.put(nodeId, nodeEpoch);
+
         if (Objects.nonNull(httpAddress) && !httpAddress.isEmpty()) {
             nodeAddresses.put(nodeId, httpAddress);
         }
@@ -68,9 +71,11 @@ public final class StreamControlManager {
 
     public void nodeEpochCheck(int nodeId, long nodeEpoch) {
         Long current = nodeEpochs.get(nodeId);
+
         if (Objects.isNull(current)) {
             throw MetadataException.nodeEpochMismatch("node " + nodeId + " is not registered");
         }
+
         if (current != nodeEpoch) {
             throw MetadataException.nodeEpochMismatch(
                 "node " + nodeId + " epoch mismatch current=" + current + " request=" + nodeEpoch);
@@ -81,102 +86,126 @@ public final class StreamControlManager {
         nodeEpochCheck(nodeId, nodeEpoch);
         long streamId = nextAssignedStreamId++;
         StreamMetadata metadata = new StreamMetadata(streamId, -1, 0, 0, StreamState.CLOSED);
+
         metadata.nodeId(nodeId);
         streamsMetadata.put(streamId, metadata);
+
         return streamId;
     }
 
     public StreamMetadata openStream(int nodeId, long nodeEpoch, long streamId, long epoch) {
         nodeEpochCheck(nodeId, nodeEpoch);
         StreamMetadata stream = requireStream(streamId);
+
         if (stream.epoch() > epoch) {
             throw MetadataException.streamFenced(
                 "stream " + streamId + " epoch " + stream.epoch() + " fences request epoch " + epoch);
         }
+
         if (stream.epoch() == epoch) {
             if (stream.state() == StreamState.OPENED && stream.nodeId() == nodeId) {
                 return stream;
             }
+
             throw MetadataException.streamFenced(
                 "stream " + streamId + " epoch " + epoch + " already used");
         }
+
         if (stream.state() == StreamState.OPENED) {
             throw MetadataException.streamNotClosed(streamId);
         }
+
         stream.epoch(epoch);
         stream.state(StreamState.OPENED);
         stream.nodeId(nodeId);
+
         return stream;
     }
 
     public void trimStream(int nodeId, long nodeEpoch, long streamId, long epoch, long newStartOffset) {
         nodeEpochCheck(nodeId, nodeEpoch);
         StreamMetadata stream = requireOpenedStream(streamId, epoch);
+
         if (newStartOffset < stream.startOffset()) {
             throw MetadataException.unexpected(
                 "stream " + streamId + " new start offset " + newStartOffset
                     + " is less than current start offset " + stream.startOffset());
         }
+
         if (newStartOffset > stream.endOffset()) {
             throw MetadataException.unexpected(
                 "stream " + streamId + " new start offset " + newStartOffset
                     + " is greater than current end offset " + stream.endOffset());
         }
+
         stream.startOffset(newStartOffset);
     }
 
     public void closeStream(int nodeId, long nodeEpoch, long streamId, long epoch) {
         nodeEpochCheck(nodeId, nodeEpoch);
         StreamMetadata stream = requireStream(streamId);
+
         if (stream.state() == StreamState.CLOSED && stream.epoch() == epoch) {
             return;
         }
+
         if (stream.state() != StreamState.OPENED) {
             throw MetadataException.unexpected("stream " + streamId + " is not opened");
         }
+
         if (stream.epoch() != epoch) {
             throw MetadataException.expiredEpoch(
                 "stream " + streamId + " epoch " + epoch + " is not equal to current epoch " + stream.epoch());
         }
+
         stream.state(StreamState.CLOSED);
     }
 
     public void deleteStream(int nodeId, long nodeEpoch, long streamId, long epoch) {
         nodeEpochCheck(nodeId, nodeEpoch);
         StreamMetadata stream = streamsMetadata.get(streamId);
+
         if (Objects.isNull(stream)) {
             return;
         }
+
         if (stream.state() != StreamState.CLOSED) {
             throw MetadataException.streamNotClosed(streamId);
         }
+
         if (stream.epoch() != epoch) {
             throw MetadataException.expiredEpoch(
                 "stream " + streamId + " epoch " + epoch + " is not equal to current epoch " + stream.epoch());
         }
+
         streamsMetadata.remove(streamId);
         listeners.remove(streamId);
     }
 
     public void advanceEndOffset(long streamId, long startOffset, long endOffset, boolean compact) {
         StreamMetadata stream = requireStream(streamId);
+
         if (compact) {
             if (stream.endOffset() < endOffset) {
                 throw MetadataException.unexpected(
                     "stream " + streamId + " end offset " + stream.endOffset() + " is lesser than request " + endOffset);
             }
+
             if (stream.startOffset() > startOffset) {
                 throw MetadataException.unexpected(
                     "stream " + streamId + " start offset " + stream.startOffset()
                         + " is greater than request " + startOffset);
             }
+
             return;
         }
+
         if (stream.endOffset() != startOffset) {
             throw MetadataException.unexpected(
                 "stream " + streamId + " end offset " + stream.endOffset()
                     + " is not equal to start offset of request " + startOffset);
         }
+
         stream.endOffset(endOffset);
     }
 
@@ -204,6 +233,7 @@ public final class StreamControlManager {
         listeners.computeIfAbsent(streamId, id -> new CopyOnWriteArrayList<>()).add(listener);
         return () -> {
             CopyOnWriteArrayList<StreamMetadataListener> list = listeners.get(streamId);
+
             if (Objects.nonNull(list)) {
                 list.remove(listener);
             }
@@ -212,14 +242,19 @@ public final class StreamControlManager {
 
     public Runnable notification(long streamId) {
         StreamMetadata metadata = streamsMetadata.get(streamId);
+
         if (Objects.isNull(metadata)) {
             return null;
         }
+
         CopyOnWriteArrayList<StreamMetadataListener> list = listeners.get(streamId);
+
         if (Objects.isNull(list) || list.isEmpty()) {
             return null;
         }
+
         StreamMetadata copy = copyOf(metadata);
+
         return () -> {
             for (StreamMetadataListener listener : list) {
                 listener.onNewStreamMetadata(copy);
@@ -242,6 +277,7 @@ public final class StreamControlManager {
         this.nodeEpochs.clear();
         this.nodeEpochs.putAll(nodeEpochs);
         this.nodeAddresses.clear();
+
         if (Objects.nonNull(nodeAddresses)) {
             this.nodeAddresses.putAll(nodeAddresses);
         }
@@ -253,21 +289,26 @@ public final class StreamControlManager {
 
     private StreamMetadata requireOpenedStream(long streamId, long epoch) {
         StreamMetadata stream = requireStream(streamId);
+
         if (stream.state() != StreamState.OPENED) {
             throw MetadataException.unexpected("stream " + streamId + " is not opened");
         }
+
         if (stream.epoch() != epoch) {
             throw MetadataException.expiredEpoch(
                 "stream " + streamId + " epoch " + epoch + " is not equal to current epoch " + stream.epoch());
         }
+
         return stream;
     }
 
     private StreamMetadata requireStream(long streamId) {
         StreamMetadata stream = streamsMetadata.get(streamId);
+
         if (Objects.isNull(stream)) {
             throw MetadataException.streamNotExist(streamId);
         }
+
         return stream;
     }
 
@@ -275,6 +316,7 @@ public final class StreamControlManager {
         StreamMetadata copy = new StreamMetadata(
             stream.streamId(), stream.epoch(), stream.startOffset(), stream.endOffset(), stream.state());
         copy.nodeId(stream.nodeId());
+
         return copy;
     }
 }

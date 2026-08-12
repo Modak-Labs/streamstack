@@ -17,6 +17,7 @@ public class ServerConfigTopologyTest {
     @Test
     void loadsTopoAndAppliesStreamConfig() throws Exception {
         Path topo = tempDir.resolve("topo.yaml");
+
         Files.writeString(topo, """
             global:
               clusterName: poc
@@ -55,6 +56,7 @@ public class ServerConfigTopologyTest {
             "--node-id", "1",
             "--http-port", "9999"
         });
+
         assertEquals(1, config.nodeId());
         assertEquals("poc", config.clusterId());
         assertEquals(9999, config.httpPort());
@@ -85,6 +87,7 @@ public class ServerConfigTopologyTest {
     void walDefaultsToStorageWhenS3() {
         String storage = "0@s3://bucket?region=us-east-1";
         ServerConfig config = ServerConfig.builder().storageUri(storage).build();
+
         assertEquals(storage, config.resolveWalUri());
     }
 }

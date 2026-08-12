@@ -79,44 +79,55 @@ public final class ProducerConfig {
             this.epoch = epoch;
             return this;
         }
+
         public Builder startingSeq(long startingSeq) {
             this.startingSeq = startingSeq;
             return this;
         }
+
         public Builder autoClaim(boolean autoClaim) {
             this.autoClaim = autoClaim;
             return this;
         }
+
         public Builder maxBatchBytes(int maxBatchBytes) {
             this.maxBatchBytes = maxBatchBytes;
             return this;
         }
+
         public Builder lingerMs(long lingerMs) {
             this.lingerMs = lingerMs;
             return this;
         }
+
         public Builder maxInFlight(int maxInFlight) {
             this.maxInFlight = maxInFlight;
             return this;
         }
+
         public Builder contentType(String contentType) {
             this.contentType = contentType;
             return this;
         }
+
         public Builder onError(Consumer<DurableStreamException> onError) {
             this.onError = onError;
             return this;
         }
+
         public ProducerConfig build() {
             if (maxBatchBytes <= 0) {
                 throw new IllegalArgumentException("maxBatchBytes must be > 0");
             }
+
             if (maxInFlight <= 0) {
                 throw new IllegalArgumentException("maxInFlight must be > 0");
             }
+
             if (lingerMs < 0) {
                 throw new IllegalArgumentException("lingerMs must be >= 0");
             }
+
             return new ProducerConfig(this);
         }
     }

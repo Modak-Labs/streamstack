@@ -59,9 +59,11 @@ public final class BasinRegistry {
 
     public ObjectNode requireBasin(String basin) {
         ObjectNode doc = getBasin(basin);
+
         if (Objects.isNull(doc)) {
             throw S2Exception.basinNotFound(basin);
         }
+
         return doc;
     }
 
@@ -71,9 +73,11 @@ public final class BasinRegistry {
 
     public ObjectNode requireStream(String basin, String stream) {
         ObjectNode doc = getStream(basin, stream);
+
         if (Objects.isNull(doc)) {
             throw S2Exception.streamNotFound(stream);
         }
+
         return doc;
     }
 
@@ -109,10 +113,13 @@ public final class BasinRegistry {
         try {
             List<KeyValue> entries = kvClient.listKV(Key.of(prefix)).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
             List<Entry> out = new ArrayList<>(entries.size());
+
             for (KeyValue entry : entries) {
                 out.add(new Entry(entry.key().get().substring(trim), parse(entry.value())));
             }
+
             out.sort(Comparator.comparing(Entry::name));
+
             return out;
         } catch (Exception e) {
             throw wrap(e);
@@ -131,6 +138,7 @@ public final class BasinRegistry {
     private void putDoc(String key, ObjectNode doc) {
         try {
             byte[] bytes = mapper.writeValueAsBytes(doc);
+
             kvClient.putKV(KeyValue.of(key, ByteBuffer.wrap(bytes))).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw wrap(e);
@@ -149,8 +157,10 @@ public final class BasinRegistry {
         try {
             ByteBuffer buffer = value.get().duplicate();
             byte[] bytes = new byte[buffer.remaining()];
+
             buffer.get(bytes);
             JsonNode node = mapper.readTree(bytes);
+
             return node instanceof ObjectNode obj ? obj : mapper.createObjectNode();
         } catch (Exception e) {
             throw wrap(e);
@@ -165,6 +175,7 @@ public final class BasinRegistry {
         if (e instanceof S2Exception api) {
             return api;
         }
+
         return S2Exception.other(S2Exception.rootMessage(e));
     }
 }

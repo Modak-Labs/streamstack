@@ -20,17 +20,21 @@ final class Requests {
 
     static String basin(Context ctx) {
         String basin = ctx.header(Protocol.H_BASIN);
+
         if (Objects.isNull(basin) || basin.isEmpty()) {
             throw S2Exception.badHeader("missing " + Protocol.H_BASIN + " header");
         }
+
         return basin;
     }
 
     static JsonNode parseBody(ObjectMapper mapper, Context ctx) {
         byte[] body = ctx.bodyAsBytes();
+
         if (Objects.isNull(body) || body.length == 0) {
             return mapper.createObjectNode();
         }
+
         try {
             return mapper.readTree(body);
         } catch (Exception e) {
@@ -42,6 +46,7 @@ final class Requests {
         if (!node.hasNonNull(field) || !node.get(field).isTextual()) {
             throw S2Exception.badJson("`" + field + "` is required");
         }
+
         return node.get(field).asText();
     }
 
@@ -59,9 +64,11 @@ final class Requests {
 
     static Long queryLong(Context ctx, String name) {
         String raw = ctx.queryParam(name);
+
         if (Objects.isNull(raw) || raw.isEmpty()) {
             return null;
         }
+
         try {
             return Long.parseLong(raw);
         } catch (NumberFormatException e) {
@@ -100,18 +107,22 @@ final class Requests {
             String startAfter = ctx.queryParam(Protocol.Q_START_AFTER);
             String limitRaw = ctx.queryParam(Protocol.Q_LIMIT);
             int limit = Protocol.LIST_LIMIT_MAX;
+
             if (Objects.nonNull(limitRaw) && !limitRaw.isEmpty()) {
                 try {
                     limit = Math.min(Integer.parseInt(limitRaw), Protocol.LIST_LIMIT_MAX);
                 } catch (NumberFormatException e) {
                     throw S2Exception.badQuery("invalid limit");
                 }
+
                 if (limit < 0) {
                     throw S2Exception.badQuery("invalid limit");
                 }
             }
+
             return new ListQuery(Objects.isNull(prefix) ? "" : prefix, Objects.isNull(startAfter) ? "" : startAfter, limit);
         }
+
         boolean matches(String name) {
             return name.startsWith(prefix) && name.compareTo(startAfter) > 0;
         }

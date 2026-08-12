@@ -39,9 +39,11 @@ public final class Protocol {
 
     public static long meteredBytes(List<RecordHeader> headers, byte[] body) {
         long headerBytes = 0;
+
         for (RecordHeader header : headers) {
             headerBytes += header.name().length + header.value().length;
         }
+
         return meteredBytes(headers.size(), headerBytes, body.length);
     }
 }

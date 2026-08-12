@@ -53,6 +53,7 @@ public class DurableStreamClientTest {
 
     private void handle(String path, BiConsumer<HttpExchange, Integer> handler) {
         AtomicInteger counter = new AtomicInteger();
+
         server.createContext(path, exchange -> {
             try {
                 exchange.getRequestBody().readAllBytes();
@@ -77,7 +78,9 @@ public class DurableStreamClientTest {
             exchange.getResponseHeaders().set("Stream-Next-Offset", "1");
             reply(exchange, 204);
         });
+
         AppendResponse response = client.append(url("/appended"), "hello".getBytes(StandardCharsets.UTF_8));
+
         assertTrue(response.appended());
         assertFalse(response.closed());
         assertEquals("1", response.nextOffset().value());
@@ -86,33 +89,43 @@ public class DurableStreamClientTest {
     @Test
     void closeReportsAlreadyClosedOnlyForDuplicateClose() {
         AtomicBoolean closed = new AtomicBoolean(false);
+
         handle("/close", (exchange, attempt) -> {
             exchange.getResponseHeaders().set("Stream-Next-Offset", "3");
+
             if ("HEAD".equals(exchange.getRequestMethod())) {
                 if (closed.get()) {
                     exchange.getResponseHeaders().set("Stream-Closed", "true");
                 }
+
                 reply(exchange, 200);
+
                 return;
             }
+
             closed.set(true);
             exchange.getResponseHeaders().set("Stream-Closed", "true");
             reply(exchange, 204);
         });
+
         CloseResult first = client.close(url("/close"));
+
         assertFalse(first.alreadyClosed(), "first successful close must not report alreadyClosed");
         assertEquals("3", first.finalOffset().value());
         CloseResult second = client.close(url("/close"));
+
         assertTrue(second.alreadyClosed(), "duplicate close must report alreadyClosed");
     }
 
     @Test
     void plainAppendIsNotRetriedOnServerError() {
         AtomicInteger requests = new AtomicInteger();
+
         handle("/append-500", (exchange, attempt) -> {
             requests.incrementAndGet();
             reply(exchange, 500);
         });
+
         assertThrows(DurableStreamException.class,
             () -> client.append(url("/append-500"), "x".getBytes(StandardCharsets.UTF_8)));
         assertEquals(1, requests.get(), "non-idempotent append must not be re-sent");
@@ -125,23 +138,28 @@ public class DurableStreamClientTest {
                 reply(exchange, 503);
                 return;
             }
+
             exchange.getResponseHeaders().set("Content-Type", "text/plain");
             exchange.getResponseHeaders().set("Stream-Next-Offset", "5");
             reply(exchange, 200);
         });
+
         assertEquals("5", client.head(url("/retry-head")).nextOffset().value());
     }
 
     @Test
     void asyncAppendSurfacesServerErrorWithoutRetry() {
         AtomicInteger requests = new AtomicInteger();
+
         handle("/async-500", (exchange, attempt) -> {
             requests.incrementAndGet();
             reply(exchange, 500);
         });
+
         CompletableFuture<AppendResponse> future =
             client.appendAsync(url("/async-500"), "x".getBytes(StandardCharsets.UTF_8));
         Exception thrown = assertThrows(Exception.class, future::get);
+
         assertInstanceOf(DurableStreamException.class, thrown.getCause());
         assertEquals(1, requests.get());
     }
@@ -153,7 +171,9 @@ public class DurableStreamClientTest {
             exchange.getResponseHeaders().set("Stream-Next-Offset", "0");
             reply(exchange, 201);
         });
+
         CreateResponse response = client.create(url("/created"), "application/json");
+
         assertTrue(response.created());
         assertEquals("application/json; charset=utf-8", response.contentType());
     }
@@ -161,12 +181,15 @@ public class DurableStreamClientTest {
     @Test
     void producerBatchOfJsonRecordsIsFramedAsJsonArray() {
         List<byte[]> bodies = new ArrayList<>();
+
         server.createContext("/json-batch", exchange -> {
             try {
                 byte[] body = exchange.getRequestBody().readAllBytes();
+
                 synchronized (bodies) {
                     bodies.add(body);
                 }
+
                 exchange.getResponseHeaders().set("Stream-Next-Offset", "1");
                 exchange.getResponseHeaders().set("Producer-Epoch", "0");
                 exchange.getResponseHeaders().set(
@@ -176,6 +199,7 @@ public class DurableStreamClientTest {
                 exchange.close();
             }
         });
+
         ProducerConfig config = ProducerConfig.builder()
             .contentType("application/json")
             .lingerMs(200)
@@ -185,6 +209,7 @@ public class DurableStreamClientTest {
             producer.append("{\"b\":2}");
             producer.flush();
         }
+
         synchronized (bodies) {
             assertEquals(1, bodies.size(), "both records should be sent in one batch");
             assertEquals("[{\"a\":1},{\"b\":2}]", new String(bodies.get(0), StandardCharsets.UTF_8));
@@ -194,18 +219,22 @@ public class DurableStreamClientTest {
     @Test
     void producerSingleJsonRecordIsWrappedInArray() {
         List<byte[]> bodies = new ArrayList<>();
+
         server.createContext("/json-single", exchange -> {
             try {
                 byte[] body = exchange.getRequestBody().readAllBytes();
+
                 synchronized (bodies) {
                     bodies.add(body);
                 }
+
                 exchange.getResponseHeaders().set("Stream-Next-Offset", "1");
                 exchange.sendResponseHeaders(200, -1);
             } finally {
                 exchange.close();
             }
         });
+
         ProducerConfig config = ProducerConfig.builder()
             .contentType("application/json")
             .lingerMs(0)
@@ -214,6 +243,7 @@ public class DurableStreamClientTest {
             producer.append("{\"a\":1}");
             producer.flush();
         }
+
         synchronized (bodies) {
             assertEquals(1, bodies.size());
             assertEquals("[{\"a\":1}]", new String(bodies.get(0), StandardCharsets.UTF_8));

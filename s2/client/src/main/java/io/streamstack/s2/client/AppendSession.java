@@ -42,10 +42,13 @@ public final class AppendSession implements AutoCloseable {
         if (pending.isEmpty()) {
             return lastAck;
         }
+
         List<AppendRecord> batch = List.copyOf(pending);
+
         pending.clear();
         lastAck = stream.append(new AppendRequest(batch, matchSeqNum, fencingToken));
         matchSeqNum = lastAck.end().seqNum();
+
         return lastAck;
     }
 

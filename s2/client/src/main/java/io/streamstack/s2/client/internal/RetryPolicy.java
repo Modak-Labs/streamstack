@@ -46,7 +46,9 @@ public final class RetryPolicy {
         if (attempt <= 0 || initialDelay.isZero()) {
             return Duration.ZERO;
         }
+
         double millis = initialDelay.toMillis() * Math.pow(multiplier, attempt - 1);
+
         return Duration.ofMillis(Math.min((long) millis, maxDelay.toMillis()));
     }
 }

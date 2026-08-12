@@ -37,13 +37,17 @@ public final class ProtocolConverter {
 
     public static AppendCommand toAppendCommand(String name, AppendRequest request) {
         String streamSeq = request.streamSeq();
+
         if (Objects.nonNull(streamSeq) && streamSeq.isEmpty()) {
             streamSeq = null;
         }
+
         Producer producer = null;
+
         if (Objects.nonNull(request.producerId())) {
             producer = new Producer(request.producerId(), request.producerEpoch(), request.producerSeq());
         }
+
         List<byte[]> payloads = Objects.isNull(request.body()) || request.body().length == 0
             ? List.of()
             : List.of(request.body());
@@ -100,9 +104,11 @@ public final class ProtocolConverter {
         if (Objects.isNull(offset)) {
             return null;
         }
+
         if (offset.isBeginning()) {
             return OffsetToken.beginning();
         }
+
         return OffsetToken.parse(offset.value());
     }
 }

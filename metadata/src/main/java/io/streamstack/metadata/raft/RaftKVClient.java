@@ -57,9 +57,11 @@ public final class RaftKVClient implements KVClient {
             metadataNode.stateMachine().kvControlManager().list(prefix.get()))
             .thenApply(entries -> {
                 List<KeyValue> out = new ArrayList<>(entries.size());
+
                 for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
                     out.add(KeyValue.of(entry.getKey(), ByteBuffer.wrap(entry.getValue())));
                 }
+
                 return out;
             });
     }
@@ -68,9 +70,12 @@ public final class RaftKVClient implements KVClient {
         if (Objects.isNull(value) || value.isNull()) {
             throw new IllegalArgumentException("value must not be null");
         }
+
         ByteBuffer buffer = value.get().duplicate();
         byte[] bytes = new byte[buffer.remaining()];
+
         buffer.get(bytes);
+
         return bytes;
     }
 
@@ -78,6 +83,7 @@ public final class RaftKVClient implements KVClient {
         if (Objects.isNull(result)) {
             return null;
         }
+
         return Value.of((byte[]) result);
     }
 }

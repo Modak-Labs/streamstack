@@ -16,6 +16,7 @@ public final class Offset {
         if (Objects.isNull(value) || value.isEmpty()) {
             throw new IllegalArgumentException("empty offset");
         }
+
         return new Offset(value);
     }
 
@@ -36,9 +37,11 @@ public final class Offset {
         if (this == o) {
             return true;
         }
+
         if (!(o instanceof Offset that)) {
             return false;
         }
+
         return value.equals(that.value);
     }
 

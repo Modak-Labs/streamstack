@@ -22,13 +22,16 @@ public final class SseParser implements Closeable {
         String id = null;
         StringBuilder data = new StringBuilder();
         String line;
+
         while (Objects.nonNull((line = reader.readLine()))) {
             if (line.isEmpty()) {
                 if (Objects.isNull(event) && Objects.isNull(id) && data.isEmpty()) {
                     continue;
                 }
+
                 return Optional.of(new Event(event, id, data.toString()));
             }
+
             if (line.startsWith("event:")) {
                 event = line.substring(6).trim();
             } else if (line.startsWith("id:")) {
@@ -37,12 +40,14 @@ public final class SseParser implements Closeable {
                 if (!data.isEmpty()) {
                     data.append('\n');
                 }
+
                 String payload = line.length() > 5 && line.charAt(5) == ' '
                     ? line.substring(6)
                     : line.substring(5).trim();
                 data.append(payload);
             }
         }
+
         return Optional.empty();
     }
 

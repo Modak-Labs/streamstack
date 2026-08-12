@@ -20,30 +20,38 @@ public final class MetadataCommandResponse implements Serializable {
 
     public static MetadataCommandResponse ok(byte[] result) {
         MetadataCommandResponse response = new MetadataCommandResponse();
+
         response.status = OK;
         response.result = result;
+
         return response;
     }
 
     public static MetadataCommandResponse notLeader(String leaderId) {
         MetadataCommandResponse response = new MetadataCommandResponse();
+
         response.status = NOT_LEADER;
         response.leaderId = leaderId;
+
         return response;
     }
 
     public static MetadataCommandResponse metadataError(int errorCode, String errorMessage) {
         MetadataCommandResponse response = new MetadataCommandResponse();
+
         response.status = METADATA_ERROR;
         response.errorCode = errorCode;
         response.errorMessage = errorMessage;
+
         return response;
     }
 
     public static MetadataCommandResponse raftError(String errorMessage) {
         MetadataCommandResponse response = new MetadataCommandResponse();
+
         response.status = RAFT_ERROR;
         response.errorMessage = errorMessage;
+
         return response;
     }
 

@@ -37,11 +37,14 @@ public final class Producer implements AutoCloseable {
 
     public void submit(AppendRecord record) {
         long size = metered(record);
+
         if (!buffer.isEmpty() && (buffer.size() >= maxRecords || bufferedBytes + size > maxBytes)) {
             flush();
         }
+
         buffer.add(record);
         bufferedBytes += size;
+
         if (buffer.size() >= maxRecords || bufferedBytes >= maxBytes) {
             flush();
         }
@@ -51,9 +54,11 @@ public final class Producer implements AutoCloseable {
         if (buffer.isEmpty()) {
             return session.lastAck();
         }
+
         session.submit(buffer);
         buffer.clear();
         bufferedBytes = 0;
+
         return session.flush();
     }
 

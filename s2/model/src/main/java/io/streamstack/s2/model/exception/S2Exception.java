@@ -33,9 +33,11 @@ public class S2Exception extends RuntimeException {
 
     public static String rootMessage(Throwable t) {
         Throwable root = t;
+
         while (Objects.nonNull(root.getCause()) && root.getCause() != root) {
             root = root.getCause();
         }
+
         return Objects.isNull(root.getMessage()) ? t.toString() : root.getMessage();
     }
 

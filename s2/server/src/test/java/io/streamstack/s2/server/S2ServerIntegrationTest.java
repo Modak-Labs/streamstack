@@ -57,6 +57,7 @@ public class S2ServerIntegrationTest {
             server.start();
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             String base = server.baseUrl();
+
             basins(client, base);
             streams(client, base);
             records(client, base);
@@ -73,6 +74,7 @@ public class S2ServerIntegrationTest {
             "{\"basin\":\"" + BASIN + "\"}"));
         assertEquals(201, created.statusCode(), created.body());
         JsonNode info = MAPPER.readTree(created.body());
+
         assertEquals(BASIN, info.get("name").asText());
         assertEquals("active", info.get("state").asText());
         HttpResponse<String> duplicate = send(client, post(base + "/v1/basins",
@@ -80,10 +82,13 @@ public class S2ServerIntegrationTest {
         assertEquals(409, duplicate.statusCode());
         assertEquals("resource_already_exists", MAPPER.readTree(duplicate.body()).get("code").asText());
         HttpResponse<String> invalidName = send(client, post(base + "/v1/basins", "{\"basin\":\"UPPER\"}"));
+
         assertEquals(422, invalidName.statusCode());
         HttpResponse<String> list = send(client, get(base + "/v1/basins"));
+
         assertEquals(200, list.statusCode());
         JsonNode basins = MAPPER.readTree(list.body());
+
         assertEquals(1, basins.get("basins").size());
         assertFalse(basins.get("has_more").asBoolean());
         HttpResponse<String> reconfigured = send(client, patch(base + "/v1/basins/" + BASIN,
@@ -99,15 +104,19 @@ public class S2ServerIntegrationTest {
         assertEquals(201, created.statusCode(), created.body());
         assertEquals("logs/app-1", MAPPER.readTree(created.body()).get("name").asText());
         HttpResponse<String> list = send(client, withBasin(get(base + "/v1/streams")));
+
         assertEquals(200, list.statusCode());
         assertEquals(1, MAPPER.readTree(list.body()).get("streams").size());
         HttpResponse<String> resolved = send(client, withBasin(get(base + "/v1/streams/logs/app-1")));
+
         assertEquals(200, resolved.statusCode(), resolved.body());
         JsonNode cfg = MAPPER.readTree(resolved.body());
+
         assertEquals("standard", cfg.get("storage_class").asText());
         assertEquals("client-prefer", cfg.get("timestamping").get("mode").asText());
         assertEquals(7 * 24 * 60 * 60, cfg.get("retention_policy").get("age").asLong());
         HttpResponse<String> missing = send(client, withBasin(get(base + "/v1/streams/nope")));
+
         assertEquals(404, missing.statusCode());
         assertEquals("stream_not_found", MAPPER.readTree(missing.body()).get("code").asText());
     }
@@ -118,19 +127,23 @@ public class S2ServerIntegrationTest {
             "{\"records\":[{\"body\":\"one\"},{\"body\":\"two\",\"headers\":[[\"k\",\"v\"]]}]}")));
         assertEquals(200, appended.statusCode(), appended.body());
         JsonNode ack = MAPPER.readTree(appended.body());
+
         assertEquals(0, ack.get("start").get("seq_num").asLong());
         assertEquals(2, ack.get("end").get("seq_num").asLong());
         assertEquals(2, ack.get("tail").get("seq_num").asLong());
         assertTrue(ack.get("end").get("timestamp").asLong() > 0);
         HttpResponse<String> read = send(client, withBasin(get(records + "?seq_num=0")));
+
         assertEquals(200, read.statusCode(), read.body());
         JsonNode batch = MAPPER.readTree(read.body());
+
         assertEquals(2, batch.get("records").size());
         assertEquals("one", batch.get("records").get(0).get("body").asText());
         assertNull(batch.get("records").get(0).get("headers"));
         assertEquals("k", batch.get("records").get(1).get("headers").get(0).get(0).asText());
         assertEquals(2, batch.get("tail").get("seq_num").asLong());
         HttpResponse<String> tail = send(client, withBasin(get(records + "/tail")));
+
         assertEquals(200, tail.statusCode());
         assertEquals(2, MAPPER.readTree(tail.body()).get("tail").get("seq_num").asLong());
     }
@@ -156,6 +169,7 @@ public class S2ServerIntegrationTest {
         assertEquals(200, goodToken.statusCode(), goodToken.body());
         HttpResponse<String> readCommand = send(client, withBasin(get(records + "?seq_num=3&count=1")));
         JsonNode command = MAPPER.readTree(readCommand.body()).get("records").get(0);
+
         assertEquals("", command.get("headers").get(0).get(0).asText());
         assertEquals("fence", command.get("headers").get(0).get(1).asText());
         assertEquals("tok-1", command.get("body").asText());
@@ -165,21 +179,27 @@ public class S2ServerIntegrationTest {
         String records = base + "/v1/streams/logs/app-1/records";
         HttpResponse<String> tailOffset = send(client, withBasin(get(records + "?tail_offset=1")));
         JsonNode last = MAPPER.readTree(tailOffset.body());
+
         assertEquals(1, last.get("records").size());
         assertEquals("four", last.get("records").get(0).get("body").asText());
         HttpResponse<String> limited = send(client, withBasin(get(records + "?seq_num=0&count=2")));
+
         assertEquals(2, MAPPER.readTree(limited.body()).get("records").size());
         HttpResponse<String> tail = send(client, withBasin(get(records + "/tail")));
         long tailTs = MAPPER.readTree(tail.body()).get("tail").get("timestamp").asLong();
         HttpResponse<String> byTimestamp = send(client, withBasin(get(records + "?timestamp=" + tailTs)));
+
         assertEquals(200, byTimestamp.statusCode(), byTimestamp.body());
         JsonNode tsBatch = MAPPER.readTree(byTimestamp.body());
+
         assertTrue(tsBatch.get("records").size() >= 1);
         assertEquals(tailTs, tsBatch.get("records").get(0).get("timestamp").asLong());
         HttpResponse<String> beyond = send(client, withBasin(get(records + "?seq_num=999")));
+
         assertEquals(416, beyond.statusCode());
         assertEquals(5, MAPPER.readTree(beyond.body()).get("tail").get("seq_num").asLong());
         HttpResponse<String> clamped = send(client, withBasin(get(records + "?seq_num=999&clamp=true&wait=0")));
+
         assertEquals(200, clamped.statusCode());
         assertEquals(0, MAPPER.readTree(clamped.body()).get("records").size());
     }
@@ -198,9 +218,11 @@ public class S2ServerIntegrationTest {
         String id = null;
         String data = null;
         boolean done = false;
+
         try (var reader = new java.io.BufferedReader(
             new java.io.InputStreamReader(stream.body(), StandardCharsets.UTF_8))) {
             String line;
+
             while (Objects.nonNull((line = reader.readLine()))) {
                 if (line.startsWith("event: ")) {
                     event = line.substring(7);
@@ -208,12 +230,15 @@ public class S2ServerIntegrationTest {
                     id = line.substring(4);
                 } else if (line.startsWith("data: ")) {
                     data = line.substring(6);
+
                     if ("[DONE]".equals(data)) {
                         done = true;
                         break;
                     }
+
                     if ("batch".equals(event)) {
                         JsonNode batch = MAPPER.readTree(data);
+
                         assertEquals(2, batch.get("records").size());
                         assertEquals("one", batch.get("records").get(0).get("body").asText());
                         assertTrue(Objects.nonNull(id) && id.startsWith("1,2,"));
@@ -221,6 +246,7 @@ public class S2ServerIntegrationTest {
                 }
             }
         }
+
         assertTrue(done, "expected [DONE] after count limit");
     }
 
@@ -234,6 +260,7 @@ public class S2ServerIntegrationTest {
         assertEquals(200, trimmed.statusCode(), trimmed.body());
         HttpResponse<String> read = send(client, withBasin(get(records + "?seq_num=0")));
         JsonNode batch = MAPPER.readTree(read.body());
+
         assertEquals(3, batch.get("records").get(0).get("seq_num").asLong());
         HttpResponse<String> enableAutoCreate = send(client, patch(base + "/v1/basins/" + BASIN,
             "{\"create_stream_on_append\":true}"));
@@ -242,17 +269,22 @@ public class S2ServerIntegrationTest {
             base + "/v1/streams/auto/records", "{\"records\":[{\"body\":\"hi\"}]}")));
         assertEquals(200, autoAppend.statusCode(), autoAppend.body());
         HttpResponse<String> autoConfig = send(client, withBasin(get(base + "/v1/streams/auto")));
+
         assertEquals(200, autoConfig.statusCode());
     }
 
     private void deletes(HttpClient client, String base) throws Exception {
         HttpResponse<String> deleteStream = send(client, withBasin(delete(base + "/v1/streams/auto")));
+
         assertEquals(204, deleteStream.statusCode());
         HttpResponse<String> gone = send(client, withBasin(get(base + "/v1/streams/auto")));
+
         assertEquals(404, gone.statusCode());
         HttpResponse<String> deleteBasin = send(client, delete(base + "/v1/basins/" + BASIN));
+
         assertEquals(204, deleteBasin.statusCode());
         HttpResponse<String> basinGone = send(client, get(base + "/v1/basins/" + BASIN));
+
         assertEquals(404, basinGone.statusCode());
     }
 

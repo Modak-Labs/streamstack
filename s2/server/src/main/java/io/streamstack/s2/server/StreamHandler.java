@@ -37,62 +37,82 @@ public final class StreamHandler {
 
     public void list(Context ctx) {
         String basin = Requests.basin(ctx);
+
         registry.requireBasin(basin);
         Requests.ListQuery query = Requests.ListQuery.of(ctx);
         List<StreamResponse> streams = new ArrayList<>();
         boolean hasMore = false;
+
         for (BasinRegistry.Entry entry : registry.listStreams(basin)) {
             if (!query.matches(entry.name())) {
                 continue;
             }
+
             if (streams.size() >= query.limit()) {
                 hasMore = true;
                 break;
             }
+
             streams.add(ProtocolConverter.toStreamResponse(entry.name(), entry.doc()));
         }
+
         Requests.json(ctx, 200, new ListStreamsResponse(streams, hasMore));
     }
 
     public void create(Context ctx) throws Exception {
         String basin = Requests.basin(ctx);
+
         registry.requireBasin(basin);
         JsonNode body = Requests.parseBody(mapper, ctx);
         String stream = Requests.requireText(body, "stream");
+
         BasinRegistry.validateStreamName(stream);
         JsonNode config = body.get("config");
+
         ConfigJson.validateStreamConfig(config);
         String requestToken = ctx.header(Protocol.H_REQUEST_TOKEN);
         ObjectNode existing = registry.getStream(basin, stream);
+
         if (Objects.nonNull(existing)) {
             if (Objects.nonNull(requestToken) && requestToken.equals(existing.path("request_token").asText(null))) {
                 Requests.json(ctx, 200, ProtocolConverter.toStreamResponse(stream, existing));
                 return;
             }
+
             throw S2Exception.alreadyExists("stream " + stream);
         }
+
         ObjectNode doc = provision(basin, stream, config, requestToken);
+
         Requests.json(ctx, 201, ProtocolConverter.toStreamResponse(stream, doc));
     }
 
     public void ensure(Context ctx) throws Exception {
         String basin = Requests.basin(ctx);
+
         registry.requireBasin(basin);
         String stream = ctx.pathParam("stream");
+
         BasinRegistry.validateStreamName(stream);
         JsonNode body = Requests.parseBody(mapper, ctx);
         JsonNode config = body.get("config");
+
         ConfigJson.validateStreamConfig(config);
         ObjectNode existing = registry.getStream(basin, stream);
+
         if (Objects.isNull(existing)) {
             ObjectNode doc = provision(basin, stream, config, ctx.header(Protocol.H_REQUEST_TOKEN));
+
             Requests.json(ctx, 201, ProtocolConverter.toStreamResponse(stream, doc));
+
             return;
         }
+
         if (Objects.nonNull(config) && !config.isNull()) {
             existing.set("config", config.deepCopy());
             registry.putStream(basin, stream, existing);
         }
+
         Requests.json(ctx, 200, ProtocolConverter.toStreamResponse(stream, existing));
     }
 
@@ -100,6 +120,7 @@ public final class StreamHandler {
         String basin = Requests.basin(ctx);
         ObjectNode basinDoc = registry.requireBasin(basin);
         ObjectNode doc = registry.requireStream(basin, ctx.pathParam("stream"));
+
         Requests.jsonNode(mapper, ctx, 200,
             ConfigJson.resolveStreamConfig(mapper, doc.get("config"), basinDoc.get("config")));
     }
@@ -110,6 +131,7 @@ public final class StreamHandler {
         String stream = ctx.pathParam("stream");
         ObjectNode doc = registry.requireStream(basin, stream);
         ObjectNode updated = ConfigJson.reconfigureStream(mapper, doc.get("config"), Requests.parseBody(mapper, ctx));
+
         doc.set("config", updated);
         registry.putStream(basin, stream, doc);
         Requests.jsonNode(mapper, ctx, 200,
@@ -118,11 +140,14 @@ public final class StreamHandler {
 
     public void delete(Context ctx) throws Exception {
         String basin = Requests.basin(ctx);
+
         registry.requireBasin(basin);
         String stream = ctx.pathParam("stream");
+
         if (Objects.isNull(registry.getStream(basin, stream))) {
             throw S2Exception.streamNotFound(stream);
         }
+
         remove(basin, stream);
         ctx.status(204);
     }
@@ -131,14 +156,17 @@ public final class StreamHandler {
         service.lifecycle().create(new CreateCommand(
             BasinRegistry.coreStreamName(basin, stream), CORE_CONTENT_TYPE, null, null, false, new byte[0]));
         ObjectNode doc = ConfigJson.newDoc(mapper, config, requestToken);
+
         doc.put("fencing_token", "");
         doc.put("trim_point", 0);
         registry.putStream(basin, stream, doc);
+
         return doc;
     }
 
     void remove(String basin, String stream) throws Exception {
         String coreName = BasinRegistry.coreStreamName(basin, stream);
+
         try {
             service.lifecycle().delete(coreName);
         } catch (StreamServiceException e) {
@@ -146,6 +174,7 @@ public final class StreamHandler {
                 throw e;
             }
         }
+
         registry.deleteStream(basin, stream);
         state.invalidate(coreName);
     }
@@ -154,8 +183,10 @@ public final class StreamHandler {
         String basin = Requests.basin(ctx);
         ObjectNode basinDoc = registry.requireBasin(basin);
         String stream = ctx.pathParam("stream");
+
         BasinRegistry.validateStreamName(stream);
         ObjectNode streamDoc = registry.getStream(basin, stream);
+
         if (Objects.isNull(streamDoc)) {
             JsonNode config = basinDoc.get("config");
             boolean autoCreate = Objects.nonNull(config) && config.path(
@@ -163,8 +194,10 @@ public final class StreamHandler {
             if (!autoCreate) {
                 throw S2Exception.streamNotFound(stream);
             }
+
             streamDoc = provision(basin, stream, null, null);
         }
+
         return new StreamContext(basin, stream, basinDoc, streamDoc);
     }
 }

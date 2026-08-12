@@ -60,7 +60,9 @@ public final class MetadataStateMachine extends StateMachineAdapter {
 
     private final ExecutorService listenerExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "metadata-listener-dispatch");
+
         t.setDaemon(true);
+
         return t;
     });
 
@@ -106,6 +108,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
 
     public <T> T read(Supplier<T> reader) {
         stateLock.readLock().lock();
+
         try {
             return reader.get();
         } finally {
@@ -117,19 +120,25 @@ public final class MetadataStateMachine extends StateMachineAdapter {
         if (appliedIndex.get() >= index) {
             return CompletableFuture.completedFuture(null);
         }
+
         CompletableFuture<Void> future = new CompletableFuture<>();
+
         applyWaiters.computeIfAbsent(index, i -> new CopyOnWriteArrayList<>()).add(future);
+
         if (appliedIndex.get() >= index) {
             completeWaiters(appliedIndex.get());
         }
+
         return future;
     }
 
     private void advanceAppliedIndex(long index) {
         long previous = appliedIndex.get();
+
         while (index > previous && !appliedIndex.compareAndSet(previous, index)) {
             previous = appliedIndex.get();
         }
+
         completeWaiters(appliedIndex.get());
     }
 
@@ -141,6 +150,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                 future.complete(null);
             }
         }
+
         ready.clear();
     }
 
@@ -149,6 +159,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
         while (iter.hasNext()) {
             MetadataClosure closure = null;
             MetadataCommand command;
+
             try {
                 if (Objects.nonNull(iter.done())) {
                     closure = (MetadataClosure) iter.done();
@@ -156,30 +167,39 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                 } else {
                     ByteBuffer data = iter.getData();
                     byte[] bytes = new byte[data.remaining()];
+
                     data.get(bytes);
                     command = MetadataCommandCodec.decode(bytes);
                 }
             } catch (Throwable t) {
                 LOGGER.error("failed to decode metadata command at index {}", iter.getIndex(), t);
                 iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, t.getMessage()));
+
                 return;
             }
+
             Runnable notification = null;
+
             try {
                 Object result;
+
                 stateLock.writeLock().lock();
+
                 try {
                     result = applyCommand(command);
                     notification = pendingNotification(command);
                 } finally {
                     stateLock.writeLock().unlock();
                 }
+
                 applySuccessCount.incrementAndGet();
+
                 if (Objects.nonNull(closure)) {
                     closure.success(result);
                 }
             } catch (MetadataException e) {
                 applyFailCount.incrementAndGet();
+
                 if (Objects.nonNull(closure)) {
                     closure.failure(e);
                 } else {
@@ -189,12 +209,16 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                 applyFailCount.incrementAndGet();
                 LOGGER.error("unexpected error applying metadata command", t);
                 iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, t.getMessage()));
+
                 return;
             }
+
             advanceAppliedIndex(iter.getIndex());
+
             if (Objects.nonNull(notification)) {
                 listenerExecutor.execute(notification);
             }
+
             iter.next();
         }
     }
@@ -203,39 +227,47 @@ public final class MetadataStateMachine extends StateMachineAdapter {
         return switch (command.type()) {
             case MetadataCommand.REGISTER_NODE -> {
                 MetadataCommand.RegisterNode c = (MetadataCommand.RegisterNode) command;
+
                 streamControlManager.registerNode(c.nodeId(), c.nodeEpoch(), c.httpAddress());
                 yield null;
             }
             case MetadataCommand.CREATE_STREAM -> {
                 MetadataCommand.CreateStream c = (MetadataCommand.CreateStream) command;
+
                 yield streamControlManager.createStream(c.nodeId(), c.nodeEpoch());
             }
             case MetadataCommand.OPEN_STREAM -> {
                 MetadataCommand.OpenStream c = (MetadataCommand.OpenStream) command;
+
                 yield streamControlManager.openStream(c.nodeId(), c.nodeEpoch(), c.streamId(), c.epoch());
             }
             case MetadataCommand.TRIM_STREAM -> {
                 MetadataCommand.TrimStream c = (MetadataCommand.TrimStream) command;
+
                 streamControlManager.trimStream(c.nodeId(), c.nodeEpoch(), c.streamId(), c.epoch(), c.newStartOffset());
                 yield null;
             }
             case MetadataCommand.CLOSE_STREAM -> {
                 MetadataCommand.CloseStream c = (MetadataCommand.CloseStream) command;
+
                 streamControlManager.closeStream(c.nodeId(), c.nodeEpoch(), c.streamId(), c.epoch());
                 yield null;
             }
             case MetadataCommand.DELETE_STREAM -> {
                 MetadataCommand.DeleteStream c = (MetadataCommand.DeleteStream) command;
+
                 streamControlManager.deleteStream(c.nodeId(), c.nodeEpoch(), c.streamId(), c.epoch());
                 objectControlManager.onStreamDeleted(c.streamId());
                 yield null;
             }
             case MetadataCommand.PREPARE_OBJECT -> {
                 MetadataCommand.PrepareObject c = (MetadataCommand.PrepareObject) command;
+
                 yield objectControlManager.prepareObject(c.nodeId(), c.nodeEpoch(), c.count(), c.ttlMs(), c.nowMs());
             }
             case MetadataCommand.COMMIT_STREAM_SET_OBJECT -> {
                 MetadataCommand.CommitStreamSetObject c = (MetadataCommand.CommitStreamSetObject) command;
+
                 try {
                     objectControlManager.commitStreamSetObject(c.nodeId(), c.nodeEpoch(), c.request(), c.nowMs());
                 } catch (MetadataException e) {
@@ -243,10 +275,12 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                         throw e;
                     }
                 }
+
                 yield new CommitStreamSetObjectResponse();
             }
             case MetadataCommand.COMPACT_STREAM_OBJECT -> {
                 MetadataCommand.CompactStreamObject c = (MetadataCommand.CompactStreamObject) command;
+
                 try {
                     objectControlManager.compactStreamObject(c.nodeId(), c.nodeEpoch(), c.request(), c.nowMs());
                 } catch (MetadataException e) {
@@ -254,27 +288,33 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                         throw e;
                     }
                 }
+
                 yield null;
             }
             case MetadataCommand.EXPIRE_PREPARED_OBJECTS -> {
                 MetadataCommand.ExpirePreparedObjects c = (MetadataCommand.ExpirePreparedObjects) command;
+
                 yield objectControlManager.expirePreparedObjects(c.nowMs());
             }
             case MetadataCommand.CLEAN_DESTROYED_OBJECTS -> {
                 MetadataCommand.CleanDestroyedObjects c = (MetadataCommand.CleanDestroyedObjects) command;
+
                 objectControlManager.cleanDestroyedObjects(c.objectIds());
                 yield null;
             }
             case MetadataCommand.PUT_KV -> {
                 MetadataCommand.PutKV c = (MetadataCommand.PutKV) command;
+
                 yield kvControlManager.put(c.key(), c.value());
             }
             case MetadataCommand.PUT_KV_IF_ABSENT -> {
                 MetadataCommand.PutKVIfAbsent c = (MetadataCommand.PutKVIfAbsent) command;
+
                 yield kvControlManager.putIfAbsent(c.key(), c.value());
             }
             case MetadataCommand.DELETE_KV -> {
                 MetadataCommand.DeleteKV c = (MetadataCommand.DeleteKV) command;
+
                 yield kvControlManager.delete(c.key());
             }
             default -> throw new IllegalArgumentException("unknown command type " + command.type());
@@ -291,6 +331,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
                     case MetadataCommand.TRIM_STREAM -> ((MetadataCommand.TrimStream) command).streamId();
                     default -> ((MetadataCommand.CloseStream) command).streamId();
                 };
+
                 yield streamControlManager.notification(streamId);
             }
             default -> null;
@@ -301,18 +342,24 @@ public final class MetadataStateMachine extends StateMachineAdapter {
     public void onSnapshotSave(SnapshotWriter writer, Closure done) {
         try {
             byte[] bytes;
+
             stateLock.readLock().lock();
+
             try {
                 bytes = MetadataSnapshotCodec.encode(streamControlManager, objectControlManager, kvControlManager);
             } finally {
                 stateLock.readLock().unlock();
             }
+
             File file = new File(writer.getPath(), SNAPSHOT_FILE);
+
             Files.write(file.toPath(), bytes);
+
             if (!writer.addFile(SNAPSHOT_FILE)) {
                 done.run(new Status(RaftError.EIO, "failed to add snapshot file"));
                 return;
             }
+
             done.run(Status.OK());
         } catch (IOException e) {
             LOGGER.error("failed to save metadata snapshot", e);
@@ -324,20 +371,27 @@ public final class MetadataStateMachine extends StateMachineAdapter {
     public boolean onSnapshotLoad(SnapshotReader reader) {
         try {
             File file = new File(reader.getPath(), SNAPSHOT_FILE);
+
             if (!file.exists()) {
                 return false;
             }
+
             byte[] bytes = Files.readAllBytes(file.toPath());
+
             stateLock.writeLock().lock();
+
             try {
                 MetadataSnapshotCodec.decode(bytes, streamControlManager, objectControlManager, kvControlManager);
             } finally {
                 stateLock.writeLock().unlock();
             }
+
             RaftOutter.SnapshotMeta meta = reader.load();
+
             if (Objects.nonNull(meta)) {
                 advanceAppliedIndex(meta.getLastIncludedIndex());
             }
+
             return true;
         } catch (IOException e) {
             LOGGER.error("failed to load metadata snapshot", e);
@@ -349,6 +403,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
     public void onLeaderStart(long term) {
         leaderTerm.set(term);
         MetadataLifecycle current = lifecycle;
+
         if (Objects.nonNull(current)) {
             current.onLeaderStart();
         }
@@ -358,6 +413,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
     public void onLeaderStop(Status status) {
         leaderTerm.set(-1);
         MetadataLifecycle current = lifecycle;
+
         if (Objects.nonNull(current)) {
             current.onLeaderStop();
         }
@@ -371,6 +427,7 @@ public final class MetadataStateMachine extends StateMachineAdapter {
 
     public byte[] stateDigestSource() {
         stateLock.readLock().lock();
+
         try {
             return MetadataSnapshotCodec.encode(streamControlManager, objectControlManager, kvControlManager);
         } finally {

@@ -41,6 +41,7 @@ public class StreamControlManagerTest {
     @Test
     void writesRequireRegisteredNodeEpoch() {
         MetadataException e = assertThrows(MetadataException.class, () -> streams.createStream(3, 1L));
+
         assertEquals(MetadataException.NODE_EPOCH_MISMATCH, e.code());
         e = assertThrows(MetadataException.class, () -> streams.createStream(NODE_1, EPOCH_1 + 1));
         assertEquals(MetadataException.NODE_EPOCH_MISMATCH, e.code());
@@ -50,6 +51,7 @@ public class StreamControlManagerTest {
     void staleNodeEpochIsFencedAfterReRegistration() {
         streams.registerNode(NODE_1, EPOCH_1 + 5);
         MetadataException e = assertThrows(MetadataException.class, () -> streams.createStream(NODE_1, EPOCH_1));
+
         assertEquals(MetadataException.NODE_EPOCH_MISMATCH, e.code());
         e = assertThrows(MetadataException.class, () -> streams.registerNode(NODE_1, EPOCH_1));
         assertEquals(MetadataException.NODE_EPOCH_MISMATCH, e.code());
@@ -59,8 +61,10 @@ public class StreamControlManagerTest {
     void openStreamLifecycleAndFencing() {
         long streamId = streams.createStream(NODE_1, EPOCH_1);
         StreamMetadata opened = streams.openStream(NODE_1, EPOCH_1, streamId, 1);
+
         assertEquals(StreamState.OPENED, opened.state());
         StreamMetadata retried = streams.openStream(NODE_1, EPOCH_1, streamId, 1);
+
         assertEquals(StreamState.OPENED, retried.state());
         MetadataException e = assertThrows(MetadataException.class,
             () -> streams.openStream(NODE_2, EPOCH_2, streamId, 1));
@@ -73,12 +77,14 @@ public class StreamControlManagerTest {
         assertEquals(MetadataException.STREAM_NOT_CLOSED, e.code());
         streams.closeStream(NODE_1, EPOCH_1, streamId, 1);
         StreamMetadata reopened = streams.openStream(NODE_2, EPOCH_2, streamId, 2);
+
         assertEquals(NODE_2, reopened.nodeId());
     }
 
     @Test
     void closeStreamIsIdempotent() {
         long streamId = streams.createStream(NODE_1, EPOCH_1);
+
         streams.openStream(NODE_1, EPOCH_1, streamId, 1);
         streams.closeStream(NODE_1, EPOCH_1, streamId, 1);
         streams.closeStream(NODE_1, EPOCH_1, streamId, 1);
@@ -88,6 +94,7 @@ public class StreamControlManagerTest {
     @Test
     void deleteStreamIsIdempotentAndMarksObjectsDestroyed() {
         long streamId = streams.createStream(NODE_1, EPOCH_1);
+
         streams.openStream(NODE_1, EPOCH_1, streamId, 1);
         long objectId = objects.prepareObject(NODE_1, EPOCH_1, 1, 60_000, 0);
         CompactStreamObjectRequest compact = new CompactStreamObjectRequest(
@@ -105,6 +112,7 @@ public class StreamControlManagerTest {
     void getOpeningStreamsFiltersByNode() {
         long stream1 = streams.createStream(NODE_1, EPOCH_1);
         long stream2 = streams.createStream(NODE_2, EPOCH_2);
+
         streams.openStream(NODE_1, EPOCH_1, stream1, 1);
         streams.openStream(NODE_2, EPOCH_2, stream2, 1);
         assertEquals(1, streams.getOpeningStreams(NODE_1).size());
@@ -116,9 +124,11 @@ public class StreamControlManagerTest {
     @Test
     void commitAdvancesEndOffsetAndIsRedundantOnRetry() {
         long streamId = streams.createStream(NODE_1, EPOCH_1);
+
         streams.openStream(NODE_1, EPOCH_1, streamId, 1);
         long objectId = objects.prepareObject(NODE_1, EPOCH_1, 1, 60_000, 0);
         CommitStreamSetObjectRequest request = new CommitStreamSetObjectRequest();
+
         request.setObjectId(objectId);
         request.setOrderId(objectId);
         request.setObjectSize(64);
@@ -135,6 +145,7 @@ public class StreamControlManagerTest {
     @Test
     void compactRetryIsRedundant() {
         long streamId = streams.createStream(NODE_1, EPOCH_1);
+
         streams.openStream(NODE_1, EPOCH_1, streamId, 1);
         long objectId = objects.prepareObject(NODE_1, EPOCH_1, 1, 60_000, 0);
         CompactStreamObjectRequest compact = new CompactStreamObjectRequest(
@@ -159,6 +170,7 @@ public class StreamControlManagerTest {
             List.of(1L, 2L, 3L),
             List.of(CompactOperations.KEEP_DATA, CompactOperations.DELETE, CompactOperations.DEEP_DELETE));
         var peeked = objects.peekDestroyedObjects(10);
+
         assertEquals(3, peeked.size());
         assertEquals(3, objects.markDestroyedObjects().size());
         objects.cleanDestroyedObjects(List.of(1L, 2L));
@@ -179,25 +191,31 @@ public class StreamControlManagerTest {
         long seed = 424242L;
         byte[] first = runScriptedOperations(seed);
         byte[] second = runScriptedOperations(seed);
+
         assertTrue(Arrays.equals(first, second));
     }
 
     private static byte[] runScriptedOperations(long seed) {
         StreamControlManager streams = new StreamControlManager();
         S3ObjectControlManager objects = new S3ObjectControlManager(streams);
+
         streams.registerNode(NODE_1, EPOCH_1);
         Random random = new Random(seed);
+
         for (int i = 0; i < 200; i++) {
             int op = random.nextInt(4);
+
             try {
                 switch (op) {
                     case 0 -> streams.createStream(NODE_1, EPOCH_1);
                     case 1 -> {
                         long streamId = random.nextInt(20);
+
                         streams.openStream(NODE_1, EPOCH_1, streamId, random.nextInt(5));
                     }
                     case 2 -> {
                         long streamId = random.nextInt(20);
+
                         streams.closeStream(NODE_1, EPOCH_1, streamId, random.nextInt(5));
                     }
                     default -> objects.prepareObject(NODE_1, EPOCH_1, 1 + random.nextInt(3), 1000, i);
@@ -205,6 +223,7 @@ public class StreamControlManagerTest {
             } catch (MetadataException ignored) {
             }
         }
+
         return MetadataSnapshotCodec.encode(streams, objects);
     }
 }

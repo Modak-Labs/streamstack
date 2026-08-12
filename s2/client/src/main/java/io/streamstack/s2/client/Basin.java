@@ -34,10 +34,12 @@ public final class Basin {
 
     public ListStreamsResponse listStreams(String prefix, String startAfter, Integer limit) {
         StringBuilder query = new StringBuilder();
+
         HttpTransport.appendParam(query, "prefix", prefix);
         HttpTransport.appendParam(query, "start_after", startAfter);
         HttpTransport.appendParam(query, "limit", limit);
         String path = "/v1/streams" + (query.isEmpty() ? "" : "?" + query);
+
         return transport.execute(transport.withBasin(transport.request(path), name).GET(),
             ListStreamsResponse.class, 200);
     }
@@ -49,22 +51,27 @@ public final class Basin {
     public StreamResponse createStream(String stream, JsonNode config, String requestToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("stream", stream);
+
         if (Objects.nonNull(config)) {
             body.put("config", config);
         }
+
         var builder = transport.withBasin(transport.request("/v1/streams"), name)
             .POST(transport.jsonBody(body));
         if (Objects.nonNull(requestToken)) {
             builder.header("s2-request-token", requestToken);
         }
+
         return transport.execute(builder, StreamResponse.class, 201, 200);
     }
 
     public StreamResponse ensureStream(String stream, JsonNode config) {
         Map<String, Object> body = new LinkedHashMap<>();
+
         if (Objects.nonNull(config)) {
             body.put("config", config);
         }
+
         return transport.execute(
             transport.withBasin(transport.request("/v1/streams/" + HttpTransport.encodePath(stream)), name)
                 .PUT(transport.jsonBody(body)),

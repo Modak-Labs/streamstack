@@ -16,7 +16,9 @@ public final class ContentTypes {
         if (Objects.isNull(contentType)) {
             return "";
         }
+
         int semi = contentType.indexOf(';');
+
         return (semi >= 0 ? contentType.substring(0, semi) : contentType).trim().toLowerCase(Locale.ROOT);
     }
 

@@ -107,15 +107,18 @@ public final class MetadataNode implements AutoCloseable {
         File logDir = new File(dataDir, "log");
         File metaDir = new File(dataDir, "meta");
         File snapshotDir = new File(dataDir, "snapshot");
+
         Files.createDirectories(logDir.toPath());
         Files.createDirectories(metaDir.toPath());
         Files.createDirectories(snapshotDir.toPath());
         NodeOptions nodeOptions = new NodeOptions();
+
         nodeOptions.setElectionTimeoutMs(options.electionTimeoutMs());
         nodeOptions.setDisableCli(false);
         nodeOptions.setSnapshotIntervalSecs(options.snapshotIntervalSecs());
         nodeOptions.setSnapshotLogIndexMargin(options.snapshotLogIndexMargin());
         RaftOptions raftOptions = new RaftOptions();
+
         raftOptions.setSync(options.syncLog());
         nodeOptions.setRaftOptions(raftOptions);
         nodeOptions.setFsm(stateMachine);
@@ -123,15 +126,20 @@ public final class MetadataNode implements AutoCloseable {
         nodeOptions.setRaftMetaUri(metaDir.getAbsolutePath());
         nodeOptions.setSnapshotUri(snapshotDir.getAbsolutePath());
         Configuration conf = new Configuration();
+
         for (String peer : peers) {
             PeerId peerId = new PeerId();
+
             if (!peerId.parse(peer)) {
                 throw new IllegalArgumentException("invalid peer " + peer);
             }
+
             conf.addPeer(peerId);
         }
+
         nodeOptions.setInitialConf(conf);
         RpcServer rpcServer = RaftRpcServerFactory.createRaftRpcServer(serverId.getEndpoint());
+
         rpcServer.registerProcessor(new MetadataCommandProcessor(this));
         this.raftGroupService = new RaftGroupService(DEFAULT_GROUP_ID, serverId, nodeOptions, rpcServer);
         this.node = raftGroupService.start();
@@ -139,14 +147,19 @@ public final class MetadataNode implements AutoCloseable {
         this.lifecycle = new MetadataLifecycle(client, objectStorage);
         this.stateMachine.setLifecycle(lifecycle);
         this.health = new MetadataHealth(this);
+
         if (this.node.isLeader()) {
             lifecycle.onLeaderStart();
         }
+
         this.registrar = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "metadata-registrar-" + nodeId);
+
             t.setDaemon(true);
+
             return t;
         });
+
         this.registrar.scheduleWithFixedDelay(this::tryRegister, 100, 500, TimeUnit.MILLISECONDS);
     }
 
@@ -155,12 +168,14 @@ public final class MetadataNode implements AutoCloseable {
             registrar.shutdown();
             return;
         }
+
         client.propose(new MetadataCommand.RegisterNode(nodeId, nodeEpoch, httpAddress))
             .whenComplete((result, error) -> {
                 if (Objects.isNull(error)) {
                     if (registered.compareAndSet(false, true)) {
                         LOGGER.info("metadata node {} registered with epoch {}", nodeId, nodeEpoch);
                     }
+
                     registrar.shutdown();
                 } else {
                     LOGGER.debug("metadata node {} registration attempt failed: {}", nodeId, error.getMessage());
@@ -218,23 +233,29 @@ public final class MetadataNode implements AutoCloseable {
 
     public void awaitLeader(long timeout, TimeUnit unit) throws InterruptedException {
         long deadline = System.nanoTime() + unit.toNanos(timeout);
+
         while (System.nanoTime() < deadline) {
             if (Objects.nonNull(node.getLeaderId())) {
                 return;
             }
+
             Thread.sleep(50);
         }
+
         throw new IllegalStateException("timed out waiting for metadata leader");
     }
 
     public void awaitRegistered(long timeout, TimeUnit unit) throws InterruptedException {
         long deadline = System.nanoTime() + unit.toNanos(timeout);
+
         while (System.nanoTime() < deadline) {
             if (registered.get()) {
                 return;
             }
+
             Thread.sleep(50);
         }
+
         throw new IllegalStateException("timed out waiting for metadata node registration");
     }
 
@@ -244,35 +265,45 @@ public final class MetadataNode implements AutoCloseable {
             return CompletableFuture.failedFuture(
                 new NotLeaderException(Objects.isNull(leader) ? null : leader.toString()));
         }
+
         byte[] data = MetadataCommandCodec.encode(command);
         MetadataClosure closure = new MetadataClosure(command);
         Task task = new Task();
+
         task.setData(ByteBuffer.wrap(data));
         task.setDone(closure);
         node.apply(task);
+
         return closure.future();
     }
 
     public CompletableFuture<Status> changePeers(Configuration conf) {
         CompletableFuture<Status> future = new CompletableFuture<>();
+
         node.changePeers(conf, status -> completeStatus(future, status));
+
         return future;
     }
 
     public CompletableFuture<Status> addPeer(PeerId peer) {
         CompletableFuture<Status> future = new CompletableFuture<>();
+
         node.addPeer(peer, status -> completeStatus(future, status));
+
         return future;
     }
 
     public CompletableFuture<Status> removePeer(PeerId peer) {
         CompletableFuture<Status> future = new CompletableFuture<>();
+
         node.removePeer(peer, status -> completeStatus(future, status));
+
         return future;
     }
 
     public void triggerSnapshot() throws InterruptedException {
         CompletableFuture<Status> future = new CompletableFuture<>();
+
         node.snapshot(status -> {
             if (status.isOk()) {
                 future.complete(status);
@@ -280,6 +311,7 @@ public final class MetadataNode implements AutoCloseable {
                 future.completeExceptionally(new IllegalStateException(status.getErrorMsg()));
             }
         });
+
         future.join();
     }
 
@@ -304,8 +336,10 @@ public final class MetadataNode implements AutoCloseable {
         registrar.shutdownNow();
         lifecycle.close();
         client.close();
+
         if (Objects.nonNull(raftGroupService)) {
             raftGroupService.shutdown();
+
             try {
                 raftGroupService.join();
             } catch (InterruptedException e) {
@@ -320,6 +354,7 @@ public final class MetadataNode implements AutoCloseable {
             super(Objects.isNull(leaderId) ? "no leader" : "not leader, leader=" + leaderId);
             this.leaderId = leaderId;
         }
+
         public String leaderId() {
             return leaderId;
         }

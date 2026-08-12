@@ -22,6 +22,7 @@ public final class OffsetToken {
         if (recordOffset < 0) {
             throw new IllegalArgumentException("record offset must be >= 0");
         }
+
         return new OffsetToken(String.format("%0" + WIDTH + "d", recordOffset), recordOffset);
     }
 
@@ -29,14 +30,18 @@ public final class OffsetToken {
         if (Objects.isNull(raw) || BEGINNING.equals(raw)) {
             return beginning();
         }
+
         if (raw.isEmpty()) {
             throw new IllegalArgumentException("empty offset");
         }
+
         try {
             long offset = Long.parseLong(raw);
+
             if (offset < 0) {
                 return beginning();
             }
+
             return ofRecordOffset(offset);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("invalid offset token: " + raw);
@@ -56,9 +61,11 @@ public final class OffsetToken {
         if (this == o) {
             return true;
         }
+
         if (!(o instanceof OffsetToken that)) {
             return false;
         }
+
         return recordOffset == that.recordOffset;
     }
 

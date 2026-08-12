@@ -6,5 +6,6 @@ import io.streamstack.server.model.Owner;
 public interface OwnershipService {
 
     Owner ownerOf(String name) throws StreamServiceException;
+
     NodeMeta localNode();
 }

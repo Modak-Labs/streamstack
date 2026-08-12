@@ -12,6 +12,7 @@ public class OffsetTokenTest {
     void zeroPaddedAndMonotonic() {
         OffsetToken a = OffsetToken.ofRecordOffset(1);
         OffsetToken b = OffsetToken.ofRecordOffset(2);
+
         assertTrue(a.value().compareTo(b.value()) < 0);
         assertEquals(20, a.value().length());
         assertEquals(1, OffsetToken.parse(a.value()).recordOffset());

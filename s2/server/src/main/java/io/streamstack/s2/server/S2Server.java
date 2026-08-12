@@ -43,14 +43,17 @@ public final class S2Server implements AutoCloseable {
             node.service(), registry, streams, state, mapper,
             Duration.ofSeconds(config.sseMaxDurationSec()));
         OwnershipRouter router = new OwnershipRouter(node.service(), config.routingMode());
+
         this.app = Javalin.create(cfg -> {
             cfg.showJavalinBanner = false;
             cfg.useVirtualThreads = true;
         });
+
         app.get("/health", ctx -> {
             ctx.status(200);
             ctx.result("ok");
         });
+
         app.get("/v1/basins", basins::list);
         app.post("/v1/basins", basins::create);
         app.get("/v1/basins/{basin}", basins::getConfig);
@@ -80,6 +83,7 @@ public final class S2Server implements AutoCloseable {
                     Objects.isNull(e.getMessage()) ? "conflict" : e.getMessage()));
             }
         });
+
         app.exception(Exception.class, (e, ctx) ->
             write(ctx, 500, new ErrorResponse("other", S2Exception.rootMessage(e))));
     }
@@ -94,6 +98,7 @@ public final class S2Server implements AutoCloseable {
         if (!started.compareAndSet(false, true)) {
             return;
         }
+
         node.start();
         app.start(config.httpHost(), config.httpPort());
         LOGGER.info("streamstack s2 server started nodeId={} http={}:{} raft={}:{} storage={} wal={}",
@@ -115,6 +120,7 @@ public final class S2Server implements AutoCloseable {
             app.stop();
         } catch (Exception ignored) {
         }
+
         node.close();
         started.set(false);
     }
@@ -122,6 +128,7 @@ public final class S2Server implements AutoCloseable {
     public static void main(String[] args) throws Exception {
         ServerConfig config = ServerConfig.fromArgs(args);
         S2Server server = new S2Server(config);
+
         Runtime.getRuntime().addShutdownHook(new Thread(server::close));
         server.start();
     }

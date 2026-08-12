@@ -16,9 +16,11 @@ public enum Format {
         if (Objects.isNull(value) || value.isEmpty() || "raw".equalsIgnoreCase(value)) {
             return RAW;
         }
+
         if ("base64".equalsIgnoreCase(value)) {
             return BASE64;
         }
+
         throw S2Exception.badHeader("invalid s2-format: " + value);
     }
 
@@ -33,6 +35,7 @@ public enum Format {
         if (Objects.isNull(value)) {
             return new byte[0];
         }
+
         return switch (this) {
             case RAW -> value.getBytes(StandardCharsets.UTF_8);
             case BASE64 -> Base64.getDecoder().decode(value);

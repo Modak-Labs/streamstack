@@ -20,7 +20,9 @@ public final class StreamWaiterRegistry {
     public boolean await(String name, OffsetToken offset, Duration timeout) throws InterruptedException {
         ConcurrentLinkedQueue<Waiter> queue = waiters.computeIfAbsent(name, key -> new ConcurrentLinkedQueue<>());
         Waiter waiter = new Waiter(offset.recordOffset());
+
         queue.add(waiter);
+
         try {
             waiter.future().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             return true;
@@ -30,6 +32,7 @@ public final class StreamWaiterRegistry {
             return true;
         } finally {
             queue.remove(waiter);
+
             if (queue.isEmpty()) {
                 waiters.remove(name, queue);
             }
@@ -38,17 +41,22 @@ public final class StreamWaiterRegistry {
 
     public void notifyAppend(String name, long nextRecordOffset) {
         ConcurrentLinkedQueue<Waiter> queue = waiters.get(name);
+
         if (Objects.isNull(queue)) {
             return;
         }
+
         Iterator<Waiter> iterator = queue.iterator();
+
         while (iterator.hasNext()) {
             Waiter waiter = iterator.next();
+
             if (nextRecordOffset > waiter.waitOffset()) {
                 waiter.future().complete(null);
                 iterator.remove();
             }
         }
+
         if (queue.isEmpty()) {
             waiters.remove(name, queue);
         }
@@ -56,9 +64,11 @@ public final class StreamWaiterRegistry {
 
     public void notifyClosed(String name) {
         ConcurrentLinkedQueue<Waiter> queue = waiters.remove(name);
+
         if (Objects.isNull(queue)) {
             return;
         }
+
         for (Waiter waiter : queue) {
             waiter.future().complete(null);
         }
@@ -70,6 +80,7 @@ public final class StreamWaiterRegistry {
                 waiter.future().complete(null);
             }
         }
+
         waiters.clear();
     }
 

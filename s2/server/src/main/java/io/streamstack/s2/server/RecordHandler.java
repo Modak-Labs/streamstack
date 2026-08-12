@@ -63,6 +63,7 @@ public final class RecordHandler {
     public void checkTail(Context ctx) throws Exception {
         StreamContext sc = streams.resolve(ctx, false);
         StreamMeta meta = head(sc);
+
         Requests.json(ctx, 200, new TailResponse(tailPosition(sc.coreName(), meta)));
     }
 
@@ -70,20 +71,24 @@ public final class RecordHandler {
         StreamContext sc = streams.resolve(ctx, true);
         Format format = Format.parse(ctx.header(Protocol.H_FORMAT));
         AppendRequest request = readAppend(ctx, format);
+
         validateAppend(request);
         ObjectNode resolved = ConfigJson.resolveStreamConfig(
             mapper, sc.streamDoc().get("config"), sc.basinDoc().get("config"));
         Object lock = state.lock(sc.coreName());
         AppendResponse response;
+
         synchronized (lock) {
             StreamMeta meta = head(sc);
             long tailSeq = meta.nextOffset().recordOffset();
+
             checkPreconditions(request, sc, tailSeq);
             PreparedBatch batch = prepareBatch(request, resolved, lastTimestamp(sc.coreName(), tailSeq));
             AppendResult result = service.append().append(new AppendCommand(
                 sc.coreName(), batch.payloads(), StreamHandler.CORE_CONTENT_TYPE, null, null, false, true));
             long end = result.nextOffset().recordOffset();
             long start = end - request.records().size();
+
             state.cacheTimestamp(sc.coreName(), batch.lastTimestamp());
             applyCommands(sc, batch, end);
             response = new AppendResponse(
@@ -91,6 +96,7 @@ public final class RecordHandler {
                 new StreamPosition(end, batch.lastTimestamp()),
                 new StreamPosition(end, batch.lastTimestamp()));
         }
+
         Requests.json(ctx, 200, response, format);
     }
 
@@ -98,16 +104,20 @@ public final class RecordHandler {
         StreamContext sc = streams.resolve(ctx, false);
         Format format = Format.parse(ctx.header(Protocol.H_FORMAT));
         ReadRequest request = Requests.readRequest(ctx);
+
         if (Objects.nonNull(request.until()) && Objects.nonNull(request.timestamp()) && request.timestamp() >= request.until()) {
             throw S2Exception.invalid("start `timestamp` must be less than `until`");
         }
+
         if (Requests.acceptsEventStream(ctx)) {
             readSse(ctx, sc, format, request);
             return;
         }
+
         StreamMeta meta = head(sc);
         long tailSeq = meta.nextOffset().recordOffset();
         long start = resolveStart(sc, meta, request, tailSeq);
+
         if (start > tailSeq) {
             if (request.clamp()) {
                 start = tailSeq;
@@ -116,16 +126,19 @@ public final class RecordHandler {
                 return;
             }
         }
+
         long count = bound(request.count(), Protocol.RECORD_BATCH_MAX_COUNT);
         long bytes = bound(request.bytes(), Protocol.RECORD_BATCH_MAX_BYTES);
         long waitSec = Objects.isNull(request.waitSeconds())
             ? 0
             : Math.min(request.waitSeconds(), Protocol.MAX_UNARY_READ_WAIT_SEC);
         Collected collected = collect(sc, start, count, bytes, request.until());
+
         if (collected.records().isEmpty() && waitSec > 0) {
             service.read().await(sc.coreName(), OffsetToken.ofRecordOffset(start), Duration.ofSeconds(waitSec));
             collected = collect(sc, start, count, bytes, request.until());
         }
+
         StreamMeta after = head(sc);
         StreamPosition tail = collected.next() >= after.nextOffset().recordOffset()
             ? tailPosition(sc.coreName(), after)
@@ -142,8 +155,10 @@ public final class RecordHandler {
         long sentCount = 0;
         long sentBytes = 0;
         String lastEventId = ctx.header(Protocol.H_LAST_EVENT_ID);
+
         if (Objects.nonNull(lastEventId) && !lastEventId.isEmpty()) {
             String[] parts = lastEventId.split(",", 3);
+
             if (parts.length == 3) {
                 try {
                     start = Long.parseLong(parts[0].trim()) + 1;
@@ -154,10 +169,12 @@ public final class RecordHandler {
                 }
             }
         }
+
         if (start > tailSeq && !request.clamp()) {
             Requests.json(ctx, 416, new TailResponse(tailPosition(sc.coreName(), meta)), format);
             return;
         }
+
         start = Math.min(start, tailSeq);
         ctx.status(200);
         ctx.header(Protocol.H_CONTENT_TYPE, Protocol.CT_EVENT_STREAM);
@@ -167,12 +184,15 @@ public final class RecordHandler {
         long offset = start;
         long deadline = System.nanoTime() + sseMaxDuration.toNanos();
         long lastPingNanos = System.nanoTime();
+
         while (System.nanoTime() < deadline && !Thread.currentThread().isInterrupted()) {
             if (remainingCount <= 0 || remainingBytes <= 0) {
                 out.write(SseEncoder.doneEvent());
                 out.flush();
+
                 return;
             }
+
             Collected collected = collect(sc, offset,
                 Math.min(remainingCount, Protocol.RECORD_BATCH_MAX_COUNT),
                 Math.min(remainingBytes, Protocol.RECORD_BATCH_MAX_BYTES),
@@ -187,31 +207,39 @@ public final class RecordHandler {
                 StreamPosition tail = offset >= after.nextOffset().recordOffset()
                     ? tailPosition(sc.coreName(), after) : null;
                 long lastSeq = collected.records().get(collected.records().size() - 1).seqNum();
+
                 out.write(SseEncoder.batchEvent(
                     new ReadResponse(collected.records(), tail), format, lastSeq, sentCount, sentBytes));
                 out.flush();
                 continue;
             }
+
             if (collected.reachedUntil()) {
                 out.write(SseEncoder.doneEvent());
                 out.flush();
+
                 return;
             }
+
             if (System.nanoTime() - lastPingNanos > Duration.ofSeconds(10).toNanos()) {
                 StreamMeta current = head(sc);
+
                 out.write(SseEncoder.pingEvent(tailPosition(sc.coreName(), current)));
                 out.flush();
                 lastPingNanos = System.nanoTime();
             }
+
             service.read().await(sc.coreName(), OffsetToken.ofRecordOffset(offset), Duration.ofSeconds(1));
         }
     }
 
     private static void checkPreconditions(AppendRequest request, StreamContext sc, long tailSeq) {
         String storedToken = sc.streamDoc().path("fencing_token").asText("");
+
         if (Objects.nonNull(request.fencingToken()) && !request.fencingToken().equals(storedToken)) {
             throw S2Exception.fencingTokenMismatch(storedToken);
         }
+
         if (Objects.nonNull(request.matchSeqNum()) && request.matchSeqNum() != tailSeq) {
             throw S2Exception.seqNumMismatch(tailSeq);
         }
@@ -225,17 +253,23 @@ public final class RecordHandler {
         long firstTs = 0;
         String newFencingToken = null;
         Long trimPoint = null;
+
         for (int i = 0; i < request.records().size(); i++) {
             AppendRecord record = request.records().get(i);
             long ts = assignTimestamp(record, mode, uncapped, now, lastTs);
+
             lastTs = ts;
+
             if (i == 0) {
                 firstTs = ts;
             }
+
             if (record.isCommand()) {
                 String command = record.commandName();
+
                 if (Protocol.COMMAND_FENCE.equals(command)) {
                     newFencingToken = new String(record.body(), StandardCharsets.UTF_8);
+
                     if (newFencingToken.length() > 36) {
                         throw S2Exception.invalid("fencing token must be at most 36 characters");
                     }
@@ -243,13 +277,16 @@ public final class RecordHandler {
                     if (record.body().length != 8) {
                         throw S2Exception.invalid("trim command body must be 8 big-endian bytes");
                     }
+
                     trimPoint = ByteBuffer.wrap(record.body()).getLong();
                 } else {
                     throw S2Exception.invalid("unknown command: " + command);
                 }
             }
+
             payloads.add(ProtocolConverter.toEnvelopeBytes(record, ts));
         }
+
         return new PreparedBatch(payloads, firstTs, lastTs, newFencingToken, trimPoint);
     }
 
@@ -257,17 +294,21 @@ public final class RecordHandler {
         if (Objects.isNull(batch.newFencingToken()) && Objects.isNull(batch.trimPoint())) {
             return;
         }
+
         if (Objects.nonNull(batch.newFencingToken())) {
             sc.streamDoc().put("fencing_token", batch.newFencingToken());
         }
+
         if (Objects.nonNull(batch.trimPoint())) {
             long bounded = Math.min(batch.trimPoint(), end);
             long current = sc.streamDoc().path("trim_point").asLong(0);
+
             if (bounded > current) {
                 sc.streamDoc().put("trim_point", bounded);
                 service.lifecycle().trim(sc.coreName(), bounded);
             }
         }
+
         registry.putStream(sc.basin(), sc.stream(), sc.streamDoc());
     }
 
@@ -277,6 +318,7 @@ public final class RecordHandler {
         long metered = 0;
         long offset = start;
         boolean reachedUntil = false;
+
         while (records.size() < maxCount && metered < maxBytes) {
             int remaining = (int) Math.min(maxCount - records.size(), Protocol.RECORD_BATCH_MAX_COUNT);
             var rr = service.read().read(sc.coreName(), OffsetToken.ofRecordOffset(offset),
@@ -284,28 +326,36 @@ public final class RecordHandler {
             if (rr.records().isEmpty()) {
                 break;
             }
+
             for (StreamRecord raw : rr.records()) {
                 SequencedRecord record = ProtocolConverter.toSequencedRecord(raw);
+
                 if (Objects.nonNull(until) && record.timestamp() >= until) {
                     reachedUntil = true;
                     break;
                 }
+
                 long size = meteredSize(record);
+
                 if (metered + size > maxBytes && !records.isEmpty()) {
                     metered = maxBytes;
                     break;
                 }
+
                 records.add(record);
                 metered += size;
                 offset = record.seqNum() + 1;
+
                 if (records.size() >= maxCount || metered >= maxBytes) {
                     break;
                 }
             }
+
             if (reachedUntil || rr.upToDate()) {
                 break;
             }
         }
+
         return new Collected(records, offset, metered, reachedUntil);
     }
 
@@ -317,14 +367,19 @@ public final class RecordHandler {
         if (selectors > 1) {
             throw S2Exception.badQuery("only one of seq_num, timestamp, or tail_offset can be provided");
         }
+
         long first = Math.max(sc.streamDoc().path("trim_point").asLong(0), meta.startOffset().recordOffset());
+
         if (Objects.nonNull(request.seqNum())) {
             return Math.max(request.seqNum(), first);
         }
+
         if (Objects.nonNull(request.timestamp())) {
             return searchTimestamp(sc.coreName(), first, tailSeq, request.timestamp());
         }
+
         long tailOffset = Objects.isNull(request.tailOffset()) ? 0 : request.tailOffset();
+
         return Math.max(tailSeq - tailOffset, first);
     }
 
@@ -332,33 +387,43 @@ public final class RecordHandler {
         throws StreamServiceException {
         long lo = first;
         long hi = tailSeq;
+
         while (lo < hi) {
             long mid = lo + (hi - lo) / 2;
             var rr = service.read().read(coreName, OffsetToken.ofRecordOffset(mid), CORE_READ_MAX_BYTES, 1);
+
             if (rr.records().isEmpty()) {
                 break;
             }
+
             long ts = RecordEnvelopeCodec.decodeTimestamp(rr.records().get(0).payload());
+
             if (ts < timestamp) {
                 lo = mid + 1;
             } else {
                 hi = mid;
             }
         }
+
         return lo;
     }
 
     private long lastTimestamp(String coreName, long tailSeq) throws StreamServiceException {
         Long cached = state.cachedTimestamp(coreName);
+
         if (Objects.nonNull(cached)) {
             return cached;
         }
+
         if (tailSeq == 0) {
             return 0;
         }
+
         var rr = service.read().read(coreName, OffsetToken.ofRecordOffset(tailSeq - 1), CORE_READ_MAX_BYTES, 1);
         long ts = rr.records().isEmpty() ? 0 : RecordEnvelopeCodec.decodeTimestamp(rr.records().get(0).payload());
+
         state.cacheTimestamp(coreName, ts);
+
         return ts;
     }
 
@@ -374,14 +439,18 @@ public final class RecordHandler {
 
     private static AppendRequest readAppend(Context ctx, Format format) {
         byte[] body = ctx.bodyAsBytes();
+
         if (Objects.isNull(body) || body.length == 0) {
             throw S2Exception.badJson("`records` must be an array");
         }
+
         try {
             AppendRequest request = S2Json.read(body, AppendRequest.class, format);
+
             if (Objects.isNull(request.records())) {
                 throw S2Exception.badJson("`records` must be an array");
             }
+
             return request;
         } catch (S2Exception e) {
             throw e;
@@ -392,6 +461,7 @@ public final class RecordHandler {
 
     private static long assignTimestamp(AppendRecord record, String mode, boolean uncapped, long now, long lastTs) {
         long ts;
+
         if ("arrival".equals(mode)) {
             ts = now;
         } else if (Objects.nonNull(record.timestamp())) {
@@ -401,6 +471,7 @@ public final class RecordHandler {
         } else {
             ts = now;
         }
+
         return Math.max(ts, lastTs);
     }
 
@@ -408,18 +479,23 @@ public final class RecordHandler {
         if (request.records().isEmpty()) {
             throw S2Exception.invalid("batch must contain at least one record");
         }
+
         if (request.records().size() > Protocol.RECORD_BATCH_MAX_COUNT) {
             throw S2Exception.invalid("batch must contain no more than 1000 records");
         }
+
         long metered = 0;
         boolean hasCommand = false;
+
         for (AppendRecord record : request.records()) {
             metered += Protocol.meteredBytes(record.headers(), record.body());
             hasCommand |= record.isCommand();
         }
+
         if (metered > Protocol.RECORD_BATCH_MAX_BYTES) {
             throw S2Exception.invalid("batch exceeds 1 MiB of metered bytes");
         }
+
         if (hasCommand && request.records().size() != 1) {
             throw S2Exception.invalid("command records must be appended individually");
         }

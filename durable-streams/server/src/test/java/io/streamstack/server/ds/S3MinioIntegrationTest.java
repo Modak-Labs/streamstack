@@ -31,6 +31,7 @@ public class S3MinioIntegrationTest {
     @Timeout(120)
     void createAppendReadRestartRecovery() throws Exception {
         String endpoint = System.getenv().getOrDefault("STREAMSTACK_S3_ENDPOINT", "http://127.0.0.1:9000");
+
         Assumptions.assumeTrue(minioReachable(endpoint), "MinIO not reachable at " + endpoint);
         Assumptions.assumeTrue(Objects.nonNull(System.getenv("AWS_ACCESS_KEY_ID")), "AWS_ACCESS_KEY_ID required");
         Assumptions.assumeTrue(Objects.nonNull(System.getenv("AWS_SECRET_ACCESS_KEY")), "AWS_SECRET_ACCESS_KEY required");
@@ -55,6 +56,7 @@ public class S3MinioIntegrationTest {
             .longPollTimeoutSec(1)
             .build();
         String base;
+
         try (DurableStreamsServer server = new DurableStreamsServer(config)) {
             server.start();
             base = server.baseUrl() + "/streams/s3-demo";
@@ -74,6 +76,7 @@ public class S3MinioIntegrationTest {
                 HttpResponse.BodyHandlers.ofString());
             assertEquals(204, append.statusCode());
         }
+
         ServerConfig recoverConfig = ServerConfig.builder()
             .nodeId(1)
             .nodeEpoch(2)

@@ -56,6 +56,7 @@ public class S2ClientIntegrationTest {
              S2 s2 = S2.builder(server.baseUrl()).build()) {
             server.start();
             Basin basin = s2.basin("client-basin");
+
             s2.createBasin("client-basin");
             basin.createStream("events");
             Stream stream = basin.stream("events");
@@ -70,24 +71,31 @@ public class S2ClientIntegrationTest {
             assertEquals(0, ack.start().seqNum());
             assertEquals(2, ack.end().seqNum());
             ReadResponse batch = stream.read(new ReadRequest(0L, null, null, false, null, null, null, null));
+
             assertEquals(2, batch.records().size());
             assertArrayEquals("hello".getBytes(StandardCharsets.UTF_8), batch.records().get(0).body());
             assertArrayEquals("v".getBytes(StandardCharsets.UTF_8), batch.records().get(1).headers().get(0).value());
             assertEquals(2, stream.checkTail().tail().seqNum());
+
             try (var session = stream.readSession(new ReadRequest(0L, null, null, false, 2L, null, null, null))) {
                 List<SequencedRecord> records = new ArrayList<>();
+
                 for (SequencedRecord record : session) {
                     records.add(record);
                 }
+
                 assertEquals(2, records.size());
                 assertEquals("hello", new String(records.get(0).body(), StandardCharsets.UTF_8));
                 assertTrue(Objects.nonNull(session.lastEventId()) && session.lastEventId().startsWith("1,"));
             }
+
             try (var producer = stream.producer()) {
                 producer.submit(new AppendRecord(null, List.of(), "three".getBytes(StandardCharsets.UTF_8)));
                 AppendResponse flushed = producer.flush();
+
                 assertEquals(3, flushed.end().seqNum());
             }
+
             SeqNumMismatchException mismatch = assertThrows(SeqNumMismatchException.class, () ->
                 stream.append(new AppendRequest(
                     List.of(new AppendRecord(null, List.of(), "x".getBytes(StandardCharsets.UTF_8))), 0L, null)));
