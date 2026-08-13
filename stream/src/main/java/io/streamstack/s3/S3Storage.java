@@ -334,7 +334,11 @@ public class S3Storage implements Storage {
         append0(context, writeRequest, false);
         return cf.whenComplete((nil, ex) -> {
             streamRecord.release();
-            APPEND_STORAGE_LATENCY.record(TimerUtil.timeElapsedSince(startTime, TimeUnit.NANOSECONDS));
+            try {
+                APPEND_STORAGE_LATENCY.record(TimerUtil.timeElapsedSince(startTime, TimeUnit.NANOSECONDS));
+            } catch (RuntimeException metricsError) {
+                LOGGER.warn("Failed to record append storage latency", metricsError);
+            }
         });
     }
 

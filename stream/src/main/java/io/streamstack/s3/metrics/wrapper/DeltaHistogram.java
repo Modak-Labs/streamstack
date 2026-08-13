@@ -103,6 +103,10 @@ public class DeltaHistogram {
     }
 
     public void record(long value) {
+        // Silently drop invalid samples because HdrHistogram only supports non-negative values.
+        if (value < 0) {
+            return;
+        }
         cumulativeCount.increment();
         cumulativeSum.add(value);
         this.recorder.recordValue(value);

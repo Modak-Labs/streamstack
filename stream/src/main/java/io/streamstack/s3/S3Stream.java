@@ -243,7 +243,11 @@ public class S3Stream implements Stream, StreamMetadataListener {
             pendingAppends.add(cf);
             PendingRequestTracker.Handle pendingAppend = PENDING_APPEND_TRACKER.begin();
             return cf.whenComplete((nil, ex) -> {
-                APPEND_STREAM_LATENCY.record(TimerUtil.timeElapsedSince(startTimeNanos, TimeUnit.NANOSECONDS));
+                try {
+                    APPEND_STREAM_LATENCY.record(TimerUtil.timeElapsedSince(startTimeNanos, TimeUnit.NANOSECONDS));
+                } catch (RuntimeException metricsError) {
+                    logger.warn("Failed to record append stream latency", metricsError);
+                }
                 pendingAppends.remove(cf);
                 pendingAppend.close();
             });
