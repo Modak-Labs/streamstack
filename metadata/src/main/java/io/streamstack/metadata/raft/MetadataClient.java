@@ -7,6 +7,7 @@ import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.closure.ReadIndexClosure;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.entity.PeerId;
+import com.alipay.sofa.jraft.error.RaftError;
 import com.alipay.sofa.jraft.option.CliOptions;
 import com.alipay.sofa.jraft.rpc.impl.cli.CliClientServiceImpl;
 
@@ -181,37 +182,62 @@ public final class MetadataClient implements AutoCloseable {
 
     public <T> CompletableFuture<T> readIndex(Supplier<T> read) {
         CompletableFuture<T> future = new CompletableFuture<>();
+        attemptReadIndex(read, 0, future);
+        return future;
+    }
 
-        node.raftNode().readIndex(null, new ReadIndexClosure() {
-            @Override
-            public void run(Status status, long index, byte[] reqCtx) {
-                if (!status.isOk()) {
-                    future.completeExceptionally(new IllegalStateException(status.getErrorMsg()));
-                    return;
-                }
+    private <T> void attemptReadIndex(Supplier<T> read, int attempt, CompletableFuture<T> future) {
+        if (future.isDone()) {
+            return;
+        }
 
-                node.stateMachine().awaitApplied(index).whenCompleteAsync((ignored, error) -> {
-                    if (Objects.nonNull(error)) {
-                        future.completeExceptionally(unwrap(error));
+        try {
+            node.raftNode().readIndex(null, new ReadIndexClosure() {
+                @Override
+                public void run(Status status, long index, byte[] reqCtx) {
+                    if (!status.isOk()) {
+                        if (status.getRaftError() == RaftError.EAGAIN && attempt < maxRetries) {
+                            scheduleReadIndexRetry(read, attempt, future);
+                        } else {
+                            future.completeExceptionally(new IllegalStateException(status.getErrorMsg()));
+                        }
                         return;
                     }
 
-                    try {
-                        future.complete(node.stateMachine().read(read));
-                    } catch (Throwable t) {
-                        Throwable cause = unwrap(t);
-
-                        if (cause instanceof MetadataException metadataException) {
-                            future.completeExceptionally(MetadataException.toStreamClientException(metadataException));
-                        } else {
-                            future.completeExceptionally(cause);
+                    node.stateMachine().awaitApplied(index).whenCompleteAsync((ignored, error) -> {
+                        if (Objects.nonNull(error)) {
+                            future.completeExceptionally(unwrap(error));
+                            return;
                         }
-                    }
-                }, scheduler);
-            }
-        });
 
-        return future;
+                        try {
+                            future.complete(node.stateMachine().read(read));
+                        } catch (Throwable t) {
+                            Throwable cause = unwrap(t);
+
+                            if (cause instanceof MetadataException metadataException) {
+                                future.completeExceptionally(MetadataException.toStreamClientException(metadataException));
+                            } else {
+                                future.completeExceptionally(cause);
+                            }
+                        }
+                    }, scheduler);
+                }
+            });
+        } catch (Throwable t) {
+            future.completeExceptionally(unwrap(t));
+        }
+    }
+
+    private <T> void scheduleReadIndexRetry(Supplier<T> read, int attempt, CompletableFuture<T> future) {
+        try {
+            scheduler.schedule(
+                () -> attemptReadIndex(read, attempt + 1, future),
+                retrySleepMs,
+                TimeUnit.MILLISECONDS);
+        } catch (RuntimeException e) {
+            future.completeExceptionally(e);
+        }
     }
 
     @Override
