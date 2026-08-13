@@ -112,6 +112,19 @@ public class MetricsWrapperTest {
 //        Assertions.assertEquals(15000, p50, 1000);
     }
 
+    @Test
+    public void testDeltaHistogramIgnoresNegativeValues() {
+        DeltaHistogram histogram = new DeltaHistogram();
+
+        Assertions.assertDoesNotThrow(() -> histogram.record(-1));
+        Assertions.assertEquals(0, histogram.cumulativeCount());
+        Assertions.assertEquals(0, histogram.cumulativeSum());
+
+        histogram.record(1);
+        Assertions.assertEquals(1, histogram.cumulativeCount());
+        Assertions.assertEquals(1, histogram.cumulativeSum());
+    }
+
     private void mockLinearDataDist(DeltaHistogram histogram, int init, int steps) {
         for (int i = init; i < init + steps; i++) {
             histogram.record(i);
