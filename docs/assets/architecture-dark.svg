@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="530" viewBox="0 0 920 530" role="img" aria-label="Stream Stack architecture overview">
+  <style>
+    :root {
+      --ink: #d4d4d8;
+      --text: #d4d4d8;
+      --border: #d4d4d8;
+      --strong: #d4d4d8;
+      --panel: rgba(228, 228, 231, 0.04);
+      --fill: rgba(228, 228, 231, 0.08);
+      --hole: #0d1117;
+    }
+    text { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    rect, path, line, circle { stroke-width: 0.85; }
+    .cap { font-size: 11px; fill: var(--text); }
+    .lbl { font-size: 11px; fill: var(--text); }
+    .note { font-size: 10px; fill: var(--text); }
+    .chip { font-size: 9px; letter-spacing: .07em; fill: var(--text); }
+    .panel { fill: var(--panel); stroke: var(--border); }
+    .bar-t { fill: var(--fill); stroke: none; }
+    .box { fill: var(--hole); stroke: var(--border); }
+    .line { stroke: var(--strong); fill: none; }
+    .grid { stroke: #3f3f46; }
+    .dot { fill: var(--text); }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0.5 0.5 L7.5 4 L0.5 7.5 Z" fill="#d4d4d8"/>
+    </marker>
+  </defs>
+
+  <!-- facades -->
+  <g>
+    <rect class="panel" x="24" y="14" width="272" height="88" rx="3" style="stroke:none"/>
+    <path class="bar-t" d="M24,17 A3,3 0 0 1 27,14 H293 A3,3 0 0 1 296,17 V36 H24 Z"/>
+    <rect class="panel" x="24" y="14" width="272" height="88" rx="3" style="fill:none"/>
+    <line class="grid" x1="24" y1="36" x2="296" y2="36"/>
+    <circle class="dot" cx="37" cy="25" r="2.5"/>
+    <text class="lbl" x="47" y="28.5">frontend/ds</text>
+    <rect class="box" x="38" y="46" width="82" height="18" rx="3"/>
+    <text class="chip" x="79" y="57.5" text-anchor="middle">STREAM-SEQ</text>
+    <rect class="box" x="128" y="46" width="80" height="18" rx="3"/>
+    <text class="chip" x="168" y="57.5" text-anchor="middle">PRODUCERS</text>
+    <rect class="box" x="216" y="46" width="40" height="18" rx="3"/>
+    <text class="chip" x="236" y="57.5" text-anchor="middle">SSE</text>
+    <rect class="box" x="38" y="72" width="82" height="18" rx="3"/>
+    <text class="chip" x="79" y="83.5" text-anchor="middle">LONG-POLL</text>
+    <rect class="box" x="128" y="72" width="56" height="18" rx="3"/>
+    <text class="chip" x="156" y="83.5" text-anchor="middle">CLOSE</text>
+
+    <rect class="panel" x="324" y="14" width="272" height="88" rx="3" style="stroke:none"/>
+    <path class="bar-t" d="M324,17 A3,3 0 0 1 327,14 H593 A3,3 0 0 1 596,17 V36 H324 Z"/>
+    <rect class="panel" x="324" y="14" width="272" height="88" rx="3" style="fill:none"/>
+    <line class="grid" x1="324" y1="36" x2="596" y2="36"/>
+    <circle class="dot" cx="337" cy="25" r="2.5"/>
+    <text class="lbl" x="347" y="28.5">frontend/s2</text>
+    <rect class="box" x="338" y="46" width="60" height="18" rx="3"/>
+    <text class="chip" x="368" y="57.5" text-anchor="middle">BASINS</text>
+    <rect class="box" x="406" y="46" width="68" height="18" rx="3"/>
+    <text class="chip" x="440" y="57.5" text-anchor="middle">STREAMS</text>
+    <rect class="box" x="482" y="46" width="66" height="18" rx="3"/>
+    <text class="chip" x="515" y="57.5" text-anchor="middle">FENCING</text>
+    <rect class="box" x="338" y="72" width="72" height="18" rx="3"/>
+    <text class="chip" x="374" y="83.5" text-anchor="middle">SEQ-NUMS</text>
+    <rect class="box" x="418" y="72" width="40" height="18" rx="3"/>
+    <text class="chip" x="438" y="83.5" text-anchor="middle">SSE</text>
+
+    <rect class="box" x="624" y="14" width="272" height="88" rx="3" stroke-dasharray="5 4" style="fill:none"/>
+    <text class="lbl" x="760" y="62" text-anchor="middle" opacity="0.6">(next protocol)</text>
+  </g>
+
+  <!-- facades -> server -->
+  <g>
+    <path class="line" d="M160 102 V 140" marker-end="url(#ah)"/>
+    <path class="line" d="M460 102 V 140" marker-end="url(#ah)"/>
+    <path class="line" d="M760 102 V 140" marker-end="url(#ah)" stroke-dasharray="5 4"/>
+    <text class="note" x="470" y="124">HTTP</text>
+  </g>
+
+  <!-- server -->
+  <g>
+    <rect class="panel" x="140" y="140" width="640" height="110" rx="3" style="stroke:none"/>
+    <path class="bar-t" d="M140,143 A3,3 0 0 1 143,140 H777 A3,3 0 0 1 780,143 V162 H140 Z"/>
+    <rect class="panel" x="140" y="140" width="640" height="110" rx="3" style="fill:none"/>
+    <line class="grid" x1="140" y1="162" x2="780" y2="162"/>
+    <circle class="dot" cx="153" cy="151" r="2.5"/>
+    <text class="lbl" x="163" y="154.5">server</text>
+
+    <rect class="box" x="170" y="176" width="276" height="56" rx="3"/>
+    <text class="cap" x="308" y="200" text-anchor="middle">StreamService</text>
+    <text class="note" x="308" y="218" text-anchor="middle">create / append / read / trim / ownership</text>
+
+    <rect class="box" x="480" y="182" width="160" height="18" rx="3"/>
+    <text class="chip" x="560" y="193.5" text-anchor="middle">S3STREAMSERVICE</text>
+    <rect class="box" x="480" y="212" width="160" height="18" rx="3"/>
+    <text class="chip" x="560" y="223.5" text-anchor="middle">RAFT OWNERSHIP</text>
+    <path class="line" d="M446 191 H 472" marker-end="url(#ah)"/>
+    <path class="line" d="M446 221 H 472" marker-end="url(#ah)"/>
+  </g>
+
+  <!-- server -> layers -->
+  <g>
+    <path class="line" d="M239 250 V 302" marker-end="url(#ah)"/>
+    <text class="note" x="250" y="282">append &#183; fetch by offset</text>
+    <path class="line" d="M686 250 V 302" marker-end="url(#ah)"/>
+    <text class="note" x="676" y="282" text-anchor="end">MetadataCommand</text>
+  </g>
+
+  <!-- stream layer -->
+  <g>
+    <rect class="panel" x="24" y="310" width="430" height="160" rx="3" style="stroke:none"/>
+    <path class="bar-t" d="M24,313 A3,3 0 0 1 27,310 H451 A3,3 0 0 1 454,313 V332 H24 Z"/>
+    <rect class="panel" x="24" y="310" width="430" height="160" rx="3" style="fill:none"/>
+    <line class="grid" x1="24" y1="332" x2="454" y2="332"/>
+    <circle class="dot" cx="37" cy="321" r="2.5"/>
+    <text class="lbl" x="47" y="324.5">stream/ (S3Stream)</text>
+
+    <rect class="box" x="44" y="340" width="70" height="20" rx="3"/>
+    <text class="chip" x="79" y="352.5" text-anchor="middle">WAL</text>
+    <path class="line" d="M114 350 H 142" marker-end="url(#ah)"/>
+    <rect class="box" x="150" y="340" width="110" height="20" rx="3"/>
+    <text class="chip" x="205" y="352.5" text-anchor="middle">STREAM OBJECTS</text>
+    <path class="line" d="M260 350 H 288" marker-end="url(#ah)"/>
+    <rect class="box" x="296" y="340" width="94" height="20" rx="3"/>
+    <text class="chip" x="343" y="352.5" text-anchor="middle">COMPACTION</text>
+
+    <rect class="box" x="296" y="376" width="94" height="20" rx="3"/>
+    <text class="chip" x="343" y="388.5" text-anchor="middle">BLOCK CACHE</text>
+    <text class="note" x="288" y="390" text-anchor="end">reads</text>
+
+    <rect class="box" x="44" y="420" width="370" height="26" rx="3"/>
+    <text class="chip" x="229" y="436.5" text-anchor="middle">OBJECT STORAGE &#183; S3 / MINIO</text>
+    <path class="line" d="M79 360 V 412" marker-end="url(#ah)"/>
+    <path class="line" d="M205 360 V 412" marker-end="url(#ah)"/>
+    <path class="line" d="M343 420 V 404" marker-end="url(#ah)"/>
+  </g>
+
+  <!-- metadata layer -->
+  <g>
+    <rect class="panel" x="476" y="310" width="420" height="160" rx="3" style="stroke:none"/>
+    <path class="bar-t" d="M476,313 A3,3 0 0 1 479,310 H893 A3,3 0 0 1 896,313 V332 H476 Z"/>
+    <rect class="panel" x="476" y="310" width="420" height="160" rx="3" style="fill:none"/>
+    <line class="grid" x1="476" y1="332" x2="896" y2="332"/>
+    <circle class="dot" cx="489" cy="321" r="2.5"/>
+    <text class="lbl" x="499" y="324.5">metadata/ (Raft)</text>
+
+    <rect class="box" x="496" y="340" width="80" height="20" rx="3"/>
+    <text class="chip" x="536" y="352.5" text-anchor="middle">RAFT LOG</text>
+    <path class="line" d="M576 350 H 604" marker-end="url(#ah)"/>
+    <rect class="box" x="612" y="340" width="110" height="20" rx="3"/>
+    <text class="chip" x="667" y="352.5" text-anchor="middle">STATE MACHINE</text>
+    <rect class="box" x="756" y="340" width="90" height="20" rx="3"/>
+    <text class="chip" x="801" y="352.5" text-anchor="middle">SNAPSHOTS</text>
+
+    <path class="line" d="M667 360 V 376" marker-end="url(#ah)"/>
+    <rect class="box" x="496" y="384" width="72" height="18" rx="3"/>
+    <text class="chip" x="532" y="395.5" text-anchor="middle">STREAMS</text>
+    <rect class="box" x="576" y="384" width="100" height="18" rx="3"/>
+    <text class="chip" x="626" y="395.5" text-anchor="middle">OBJECT INDEX</text>
+    <rect class="box" x="684" y="384" width="36" height="18" rx="3"/>
+    <text class="chip" x="702" y="395.5" text-anchor="middle">KV</text>
+    <rect class="box" x="728" y="384" width="60" height="18" rx="3"/>
+    <text class="chip" x="758" y="395.5" text-anchor="middle">NODES</text>
+
+    <text class="note" x="686" y="436" text-anchor="middle">ownership &#183; which node serves a stream</text>
+  </g>
+
+  <!-- stream <-> metadata -->
+  <g>
+    <path class="line" d="M239 470 V 505 H 686 V 478" marker-start="url(#ah)" marker-end="url(#ah)"/>
+    <text class="note" x="463" y="497" text-anchor="middle">StreamManager &#183; ObjectManager &#183; KVClient</text>
+  </g>
+</svg>
