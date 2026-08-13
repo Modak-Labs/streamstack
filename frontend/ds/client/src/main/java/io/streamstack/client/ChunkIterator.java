@@ -2,7 +2,7 @@ package io.streamstack.client;
 
 import java.util.Objects;
 
-import io.streamstack.client.internal.SseStreamingReader;
+import io.streamstack.client.helper.SseStreamingReader;
 import io.streamstack.client.model.Chunk;
 import io.streamstack.model.LiveMode;
 import io.streamstack.model.Offset;

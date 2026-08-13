@@ -1,4 +1,4 @@
-package io.streamstack.client.internal;
+package io.streamstack.client.helper;
 
 import java.util.Objects;
 import java.time.Duration;

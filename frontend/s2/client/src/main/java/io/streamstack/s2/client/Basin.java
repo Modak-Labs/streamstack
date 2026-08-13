@@ -2,7 +2,7 @@ package io.streamstack.s2.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import io.streamstack.s2.client.internal.HttpTransport;
+import io.streamstack.s2.client.helper.HttpTransport;
 import io.streamstack.s2.model.response.ListStreamsResponse;
 import io.streamstack.s2.model.response.StreamResponse;
 

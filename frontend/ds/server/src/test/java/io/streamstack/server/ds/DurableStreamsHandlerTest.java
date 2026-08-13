@@ -6,7 +6,7 @@ import io.streamstack.server.service.AppendService;
 import io.streamstack.server.service.OwnershipService;
 import io.streamstack.server.service.ReadService;
 import io.streamstack.server.service.StreamLifecycleService;
-import io.streamstack.server.service.StreamServiceException;
+import io.streamstack.server.model.StreamServiceException;
 import io.streamstack.server.service.StreamService;
 import io.streamstack.server.model.AppendCommand;
 import io.streamstack.server.model.AppendResult;

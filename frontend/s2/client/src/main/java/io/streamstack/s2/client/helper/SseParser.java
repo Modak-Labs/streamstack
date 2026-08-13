@@ -1,4 +1,4 @@
-package io.streamstack.s2.client.internal;
+package io.streamstack.s2.client.helper;
 
 import java.util.Objects;
 import java.io.BufferedReader;

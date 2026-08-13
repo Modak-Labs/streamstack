@@ -4,6 +4,7 @@ import io.streamstack.server.model.CloseResult;
 import io.streamstack.server.model.CreateCommand;
 import io.streamstack.server.model.CreateResult;
 import io.streamstack.server.model.StreamMeta;
+import io.streamstack.server.model.StreamServiceException;
 
 import java.util.Optional;
 

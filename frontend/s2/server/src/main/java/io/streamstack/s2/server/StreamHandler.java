@@ -14,7 +14,7 @@ import io.streamstack.s2.model.response.ListStreamsResponse;
 import io.streamstack.s2.model.response.StreamResponse;
 import io.streamstack.server.model.CreateCommand;
 import io.streamstack.server.service.StreamService;
-import io.streamstack.server.service.StreamServiceException;
+import io.streamstack.server.model.StreamServiceException;
 
 import java.util.ArrayList;
 import java.util.List;

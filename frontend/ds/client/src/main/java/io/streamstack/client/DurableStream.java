@@ -2,9 +2,9 @@ package io.streamstack.client;
 
 import java.util.Objects;
 
-import io.streamstack.client.internal.ErrorMapper;
-import io.streamstack.client.internal.RetryPolicy;
-import io.streamstack.client.internal.SseStreamingReader;
+import io.streamstack.client.helper.ErrorMapper;
+import io.streamstack.client.helper.RetryPolicy;
+import io.streamstack.client.helper.SseStreamingReader;
 import io.streamstack.client.model.Chunk;
 import io.streamstack.client.model.CloseResult;
 import io.streamstack.client.model.ProducerConfig;

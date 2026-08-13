@@ -11,7 +11,7 @@ import io.streamstack.s2.model.exception.SeqNumMismatchException;
 import io.streamstack.s2.model.response.ErrorResponse;
 import io.streamstack.server.StreamStackNode;
 import io.streamstack.server.model.config.ServerConfig;
-import io.streamstack.server.service.StreamServiceException;
+import io.streamstack.server.model.StreamServiceException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

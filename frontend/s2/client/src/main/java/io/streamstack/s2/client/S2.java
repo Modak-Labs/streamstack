@@ -2,8 +2,8 @@ package io.streamstack.s2.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import io.streamstack.s2.client.internal.HttpTransport;
-import io.streamstack.s2.client.internal.RetryPolicy;
+import io.streamstack.s2.client.helper.HttpTransport;
+import io.streamstack.s2.client.helper.RetryPolicy;
 import io.streamstack.s2.model.Format;
 import io.streamstack.s2.model.response.BasinResponse;
 import io.streamstack.s2.model.response.ListBasinsResponse;

@@ -16,6 +16,8 @@ public final class DurableStreamsServer implements AutoCloseable {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DurableStreamsServer.class);
 
+    private static final long MAX_REQUEST_SIZE = 32L * 1024 * 1024;
+
     private final ServerConfig config;
     private final StreamStackNode node;
     private final Javalin app;
@@ -35,6 +37,7 @@ public final class DurableStreamsServer implements AutoCloseable {
         this.app = Javalin.create(cfg -> {
             cfg.showJavalinBanner = false;
             cfg.useVirtualThreads = true;
+            cfg.http.maxRequestSize = MAX_REQUEST_SIZE;
         });
 
         app.get("/*", router::handle);

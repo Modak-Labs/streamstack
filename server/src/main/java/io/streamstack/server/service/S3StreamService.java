@@ -30,6 +30,7 @@ import io.streamstack.server.model.CloseResult;
 import io.streamstack.server.model.StreamMeta;
 import io.streamstack.server.model.OffsetToken;
 import io.streamstack.server.model.StreamRecord;
+import io.streamstack.server.model.StreamServiceException;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -94,11 +95,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                     return new CreateResult(false, toMeta(name, existing));
                 }
 
-                Stream stream = streamClient.createAndOpenStream(
-                    CreateStreamOptions.builder().epoch(1).replicaCount(1).tag("path", name).build())
-                    .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
-                openStreams.put(stream.streamId(), stream);
-                localEpochs.put(stream.streamId(), new AtomicLong(stream.streamEpoch()));
+                Stream stream = provisionStream(name);
                 long deadline = deadlineOf(command.ttlSeconds(), command.expiresAt());
                 RegistryEntry candidate = new RegistryEntry(
                     stream.streamId(), command.contentType(), command.ttlSeconds(), command.expiresAt(),
@@ -108,32 +105,11 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                 RegistryEntry current = RegistryEntry.decode(toBytes(stored));
 
                 if (current.streamId() != candidate.streamId()) {
-                    try {
-                        stream.destroy().get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
-                    } catch (Exception ignored) {
-                    }
-
-                    openStreams.remove(stream.streamId());
-                    localEpochs.remove(stream.streamId());
-
-                    if (!configMatches(current, command.contentType(), command.ttlSeconds(), command.expiresAt(),
-                        command.closed())) {
-                        throw new StreamServiceException(StreamServiceException.Kind.CONFLICT);
-                    }
-
-                    return new CreateResult(false, toMeta(name, current));
+                    return resolveLostRace(name, stream, current, command);
                 }
 
-                if (command.initialPayload().length > 0) {
-                    List<byte[]> messages = splitMessages(command.contentType(), command.initialPayload(), true);
-
-                    for (byte[] message : messages) {
-                        appendBytes(name, stream, message);
-                    }
-
-                    if (!messages.isEmpty()) {
-                        current = requireEntry(name, false);
-                    }
+                if (appendInitialPayload(name, stream, command)) {
+                    current = requireEntry(name, false);
                 }
 
                 if (command.closed() && !current.closed()) {
@@ -235,6 +211,8 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     public AppendResult append(AppendCommand command) throws StreamServiceException {
         String name = normalize(command.name());
         Object lock = nameLocks.computeIfAbsent(name, n -> new Object());
+        List<CompletableFuture<?>> submitted;
+        AppendResult result;
 
         synchronized (lock) {
             try {
@@ -252,89 +230,30 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                     return handleProducerReject(entry, next, producer, command);
                 }
 
-                byte[] body = command.concatenatedPayload();
-
                 if (entry.closed()) {
-                    if (command.closeAfter() && body.length == 0) {
-                        if (Objects.nonNull(producer) && !matchesClosedBy(entry, command) && Objects.nonNull(entry.closedBy())) {
-                            throw new StreamServiceException(StreamServiceException.Kind.CLOSED, next, true);
-                        }
-
-                        Long echoedSeq = command.hasProducer()
-                            ? (Objects.nonNull(entry.closedBy()) ? entry.closedBy().seq() : command.producer().seq())
-                            : null;
-                        Long echoedEpoch = command.hasProducer() ? command.producer().epoch() : null;
-
-                        return new AppendResult(next, false, true, echoedEpoch, echoedSeq);
-                    }
-
-                    if (Objects.nonNull(producer) && matchesClosedBy(entry, command)) {
-                        return new AppendResult(next, false, true, command.producer().epoch(), entry.closedBy().seq());
-                    }
-
-                    throw new StreamServiceException(StreamServiceException.Kind.CLOSED, next, true);
+                    return appendToClosed(entry, command, producer, next);
                 }
 
-                boolean closeOnly = body.length == 0 && command.closeAfter();
+                boolean closeOnly = command.concatenatedPayload().length == 0 && command.closeAfter();
 
-                if (!closeOnly) {
-                    if (Objects.isNull(command.contentType()) || command.contentType().isEmpty()) {
-                        throw new StreamServiceException(
-                            StreamServiceException.Kind.BAD_REQUEST, next, false, "missing Content-Type");
-                    }
+                validatePayload(entry, command, producer, next, closeOnly);
 
-                    if (!ContentTypes.mimeEquals(entry.contentType(), command.contentType())) {
-                        throw new StreamServiceException(StreamServiceException.Kind.CONFLICT, next, false);
-                    }
-
-                    if (body.length == 0) {
-                        throw new StreamServiceException(
-                            StreamServiceException.Kind.BAD_REQUEST, next, false, "Empty body");
-                    }
+                if (closeOnly) {
+                    submitted = List.of();
+                } else {
+                    submitted = submitPayloads(stream, entry, command);
+                    next = OffsetToken.ofRecordOffset(stream.nextOffset());
                 }
 
-                if (Objects.nonNull(command.streamSeq())
-                    && (Objects.isNull(producer) || producer.status() == ProducerDecision.Status.ACCEPTED)) {
-                    if (Objects.nonNull(entry.lastSeq()) && command.streamSeq().compareTo(entry.lastSeq()) <= 0) {
-                        throw new StreamServiceException(
-                            StreamServiceException.Kind.CONFLICT, next, false, "Sequence conflict");
-                    }
-                }
-
-                if (!closeOnly) {
-                    List<byte[]> messages = expandPayloads(entry.contentType(), command.payloads());
-
-                    if (command.atomic() && messages.size() > 1) {
-                        next = appendFramedBatch(name, stream, messages);
-                    } else {
-                        for (byte[] message : messages) {
-                            next = appendBytes(name, stream, message);
-                        }
-                    }
-                }
-
-                RegistryEntry updated = entry;
-
-                if (Objects.nonNull(command.streamSeq())) {
-                    updated = updated.withLastSeq(command.streamSeq());
-                }
-
-                if (Objects.nonNull(producer) && producer.status() == ProducerDecision.Status.ACCEPTED) {
-                    Producer ctx = command.producer();
-
-                    updated = updated.withProducer(ctx.producerId(), ctx.epoch(), ctx.seq());
-                }
-
-                ClosedBy closedBy = null;
+                RegistryEntry updated = applyAppendState(entry, command, producer);
+                Long echoedSeq = command.hasProducer() ? command.producer().seq() : null;
+                Long echoedEpoch = command.hasProducer() ? command.producer().epoch() : null;
 
                 if (command.closeAfter()) {
-                    if (command.hasProducer()) {
-                        Producer ctx = command.producer();
+                    awaitSubmitted(name, submitted, next);
+                    closeEntry(name, updated, command);
 
-                        closedBy = new ClosedBy(ctx.producerId(), ctx.epoch(), ctx.seq());
-                    }
-
-                    updated = updated.close(closedBy);
+                    return new AppendResult(next, !closeOnly, true, echoedEpoch, echoedSeq);
                 }
 
                 updated = touchDeadline(updated);
@@ -343,20 +262,21 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                     putEntry(name, updated);
                 }
 
-                if (command.closeAfter()) {
-                    waiters.notifyClosed(name);
-                }
-
-                Long echoedSeq = command.hasProducer() ? command.producer().seq() : null;
-                Long echoedEpoch = command.hasProducer() ? command.producer().epoch() : null;
-
-                return new AppendResult(next, !closeOnly, command.closeAfter(), echoedEpoch, echoedSeq);
+                result = new AppendResult(next, !closeOnly, false, echoedEpoch, echoedSeq);
             } catch (StreamServiceException e) {
                 throw e;
             } catch (Exception e) {
                 throw wrap(e);
             }
         }
+
+        try {
+            awaitSubmitted(name, submitted, result.nextOffset());
+        } catch (Exception e) {
+            throw wrap(e);
+        }
+
+        return result;
     }
 
     @Override
@@ -387,66 +307,8 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
                 maxBytes = maxBytes > 0 ? maxBytes : Integer.MAX_VALUE;
                 maxRecords = maxRecords > 0 ? maxRecords : Integer.MAX_VALUE;
-                FetchResult fetch = stream.fetch(start, end, maxBytes).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
 
-                try {
-                    List<StreamRecord> records = new ArrayList<>();
-                    int total = 0;
-                    long next = start;
-
-                    outer:
-                    for (RecordBatchWithContext batch : fetch.recordBatchList()) {
-                        ByteBuffer payload = batch.rawPayload();
-                        byte[] bytes = new byte[payload.remaining()];
-
-                        payload.get(bytes);
-
-                        if (batch.count() > 1) {
-                            List<byte[]> frames = BatchFraming.decode(bytes, batch.count());
-
-                            for (int i = 0; i < frames.size(); i++) {
-                                long offset = batch.baseOffset() + i;
-
-                                if (offset < start) {
-                                    continue;
-                                }
-
-                                byte[] frame = frames.get(i);
-
-                                if (total + frame.length > maxBytes && total > 0) {
-                                    break outer;
-                                }
-
-                                records.add(new StreamRecord(OffsetToken.ofRecordOffset(offset), frame));
-                                total += frame.length;
-                                next = offset + 1;
-
-                                if (total >= maxBytes || records.size() >= maxRecords) {
-                                    break outer;
-                                }
-                            }
-
-                            continue;
-                        }
-
-                        if (total + bytes.length > maxBytes && total > 0) {
-                            break;
-                        }
-
-                        records.add(new StreamRecord(OffsetToken.ofRecordOffset(batch.baseOffset()), bytes));
-                        total += bytes.length;
-                        next = batch.lastOffset();
-
-                        if (total >= maxBytes || records.size() >= maxRecords) {
-                            break;
-                        }
-                    }
-
-                    return new ReadResult(records, entry.contentType(), OffsetToken.ofRecordOffset(next),
-                        next >= end, entry.closed());
-                } finally {
-                    fetch.free();
-                }
+                return fetchRecords(entry, stream, start, end, maxBytes, maxRecords);
             } catch (StreamServiceException e) {
                 throw e;
             } catch (Exception e) {
@@ -525,6 +387,242 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         openStreams.clear();
     }
 
+    private ReadResult fetchRecords(
+        RegistryEntry entry,
+        Stream stream,
+        long start,
+        long end,
+        int maxBytes,
+        int maxRecords) throws Exception {
+        FetchResult fetch = stream.fetch(start, end, maxBytes).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+
+        try {
+            List<StreamRecord> records = new ArrayList<>();
+            int total = 0;
+            long next = start;
+
+            outer:
+            for (RecordBatchWithContext batch : fetch.recordBatchList()) {
+                ByteBuffer payload = batch.rawPayload();
+                byte[] bytes = new byte[payload.remaining()];
+
+                payload.get(bytes);
+
+                if (batch.count() > 1) {
+                    List<byte[]> frames = BatchFraming.decode(bytes, batch.count());
+
+                    for (int i = 0; i < frames.size(); i++) {
+                        long offset = batch.baseOffset() + i;
+
+                        if (offset < start) {
+                            continue;
+                        }
+
+                        byte[] frame = frames.get(i);
+
+                        if (total + frame.length > maxBytes && total > 0) {
+                            break outer;
+                        }
+
+                        records.add(new StreamRecord(OffsetToken.ofRecordOffset(offset), frame));
+                        total += frame.length;
+                        next = offset + 1;
+
+                        if (total >= maxBytes || records.size() >= maxRecords) {
+                            break outer;
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (total + bytes.length > maxBytes && total > 0) {
+                    break;
+                }
+
+                records.add(new StreamRecord(OffsetToken.ofRecordOffset(batch.baseOffset()), bytes));
+                total += bytes.length;
+                next = batch.lastOffset();
+
+                if (total >= maxBytes || records.size() >= maxRecords) {
+                    break;
+                }
+            }
+
+            return new ReadResult(records, entry.contentType(), OffsetToken.ofRecordOffset(next),
+                next >= end, entry.closed());
+        } finally {
+            fetch.free();
+        }
+    }
+
+    private Stream provisionStream(String name) throws Exception {
+        Stream stream = streamClient.createAndOpenStream(
+            CreateStreamOptions.builder().epoch(1).replicaCount(1).tag("path", name).build())
+            .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+
+        openStreams.put(stream.streamId(), stream);
+        localEpochs.put(stream.streamId(), new AtomicLong(stream.streamEpoch()));
+
+        return stream;
+    }
+
+    private CreateResult resolveLostRace(String name, Stream stream, RegistryEntry current, CreateCommand command)
+        throws Exception {
+        try {
+            stream.destroy().get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+        }
+
+        openStreams.remove(stream.streamId());
+        localEpochs.remove(stream.streamId());
+
+        if (!configMatches(current, command.contentType(), command.ttlSeconds(), command.expiresAt(),
+            command.closed())) {
+            throw new StreamServiceException(StreamServiceException.Kind.CONFLICT);
+        }
+
+        return new CreateResult(false, toMeta(name, current));
+    }
+
+    private boolean appendInitialPayload(String name, Stream stream, CreateCommand command) throws Exception {
+        if (command.initialPayload().length == 0) {
+            return false;
+        }
+
+        List<byte[]> messages = splitMessages(command.contentType(), command.initialPayload(), true);
+
+        if (messages.isEmpty()) {
+            return false;
+        }
+
+        List<CompletableFuture<?>> submitted = new ArrayList<>(messages.size());
+
+        for (byte[] message : messages) {
+            submitted.add(submitBytes(stream, message));
+        }
+
+        awaitSubmitted(name, submitted, OffsetToken.ofRecordOffset(stream.nextOffset()));
+
+        return true;
+    }
+
+    private AppendResult appendToClosed(
+        RegistryEntry entry,
+        AppendCommand command,
+        ProducerDecision producer,
+        OffsetToken next) throws StreamServiceException {
+        if (command.closeAfter() && command.concatenatedPayload().length == 0) {
+            if (Objects.nonNull(producer) && !matchesClosedBy(entry, command) && Objects.nonNull(entry.closedBy())) {
+                throw new StreamServiceException(StreamServiceException.Kind.CLOSED, next, true);
+            }
+
+            Long echoedSeq = command.hasProducer()
+                ? (Objects.nonNull(entry.closedBy()) ? entry.closedBy().seq() : command.producer().seq())
+                : null;
+            Long echoedEpoch = command.hasProducer() ? command.producer().epoch() : null;
+
+            return new AppendResult(next, false, true, echoedEpoch, echoedSeq);
+        }
+
+        if (Objects.nonNull(producer) && matchesClosedBy(entry, command)) {
+            return new AppendResult(next, false, true, command.producer().epoch(), entry.closedBy().seq());
+        }
+
+        throw new StreamServiceException(StreamServiceException.Kind.CLOSED, next, true);
+    }
+
+    private void validatePayload(
+        RegistryEntry entry,
+        AppendCommand command,
+        ProducerDecision producer,
+        OffsetToken next,
+        boolean closeOnly) throws StreamServiceException {
+        if (!closeOnly) {
+            if (Objects.isNull(command.contentType()) || command.contentType().isEmpty()) {
+                throw new StreamServiceException(
+                    StreamServiceException.Kind.BAD_REQUEST, next, false, "missing Content-Type");
+            }
+
+            if (!ContentTypes.mimeEquals(entry.contentType(), command.contentType())) {
+                throw new StreamServiceException(StreamServiceException.Kind.CONFLICT, next, false);
+            }
+
+            if (command.concatenatedPayload().length == 0) {
+                throw new StreamServiceException(
+                    StreamServiceException.Kind.BAD_REQUEST, next, false, "Empty body");
+            }
+        }
+
+        if (Objects.nonNull(command.streamSeq())
+            && (Objects.isNull(producer) || producer.status() == ProducerDecision.Status.ACCEPTED)) {
+            if (Objects.nonNull(entry.lastSeq()) && command.streamSeq().compareTo(entry.lastSeq()) <= 0) {
+                throw new StreamServiceException(
+                    StreamServiceException.Kind.CONFLICT, next, false, "Sequence conflict");
+            }
+        }
+    }
+
+    private List<CompletableFuture<?>> submitPayloads(Stream stream, RegistryEntry entry, AppendCommand command)
+        throws StreamServiceException {
+        List<byte[]> messages = expandPayloads(entry.contentType(), command.payloads());
+
+        if (command.atomic() && messages.size() > 1) {
+            return List.of(submitFramedBatch(stream, messages));
+        }
+
+        List<CompletableFuture<?>> futures = new ArrayList<>(messages.size());
+
+        for (byte[] message : messages) {
+            futures.add(submitBytes(stream, message));
+        }
+
+        return futures;
+    }
+
+    private RegistryEntry applyAppendState(
+        RegistryEntry entry,
+        AppendCommand command,
+        ProducerDecision producer) {
+        RegistryEntry updated = entry;
+
+        if (Objects.nonNull(command.streamSeq())) {
+            updated = updated.withLastSeq(command.streamSeq());
+        }
+
+        if (Objects.nonNull(producer) && producer.status() == ProducerDecision.Status.ACCEPTED) {
+            Producer ctx = command.producer();
+
+            updated = updated.withProducer(ctx.producerId(), ctx.epoch(), ctx.seq());
+        }
+
+        return updated;
+    }
+
+    private void closeEntry(String name, RegistryEntry entry, AppendCommand command) throws Exception {
+        ClosedBy closedBy = null;
+
+        if (command.hasProducer()) {
+            Producer ctx = command.producer();
+
+            closedBy = new ClosedBy(ctx.producerId(), ctx.epoch(), ctx.seq());
+        }
+
+        putEntry(name, touchDeadline(entry.close(closedBy)));
+        waiters.notifyClosed(name);
+    }
+
+    private void awaitSubmitted(String name, List<CompletableFuture<?>> submitted, OffsetToken next)
+        throws Exception {
+        for (CompletableFuture<?> future : submitted) {
+            future.get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+        }
+
+        if (!submitted.isEmpty()) {
+            waiters.notifyAppend(name, next.recordOffset());
+        }
+    }
+
     private AppendResult handleProducerReject(
         RegistryEntry entry,
         OffsetToken next,
@@ -591,27 +689,16 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             && closedBy.seq() == command.producer().seq();
     }
 
-    private OffsetToken appendBytes(String name, Stream stream, byte[] bytes) throws Exception {
-        io.streamstack.api.AppendResult result = stream.append(
-            new DefaultRecordBatch(1, System.currentTimeMillis(), Map.of(), ByteBuffer.wrap(bytes)))
-            .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
-        long next = Math.max(result.baseOffset() + 1, stream.nextOffset());
-
-        waiters.notifyAppend(name, next);
-
-        return OffsetToken.ofRecordOffset(next);
+    private CompletableFuture<?> submitBytes(Stream stream, byte[] bytes) {
+        return stream.append(
+            new DefaultRecordBatch(1, System.currentTimeMillis(), Map.of(), ByteBuffer.wrap(bytes)));
     }
 
-    private OffsetToken appendFramedBatch(String name, Stream stream, List<byte[]> records) throws Exception {
+    private CompletableFuture<?> submitFramedBatch(Stream stream, List<byte[]> records) {
         byte[] framed = BatchFraming.encode(records);
-        io.streamstack.api.AppendResult result = stream.append(
-            new DefaultRecordBatch(records.size(), System.currentTimeMillis(), Map.of(), ByteBuffer.wrap(framed)))
-            .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
-        long next = Math.max(result.baseOffset() + records.size(), stream.nextOffset());
 
-        waiters.notifyAppend(name, next);
-
-        return OffsetToken.ofRecordOffset(next);
+        return stream.append(
+            new DefaultRecordBatch(records.size(), System.currentTimeMillis(), Map.of(), ByteBuffer.wrap(framed)));
     }
 
     private static List<byte[]> expandPayloads(String contentType, List<byte[]> payloads)
@@ -816,7 +903,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             entry.ttlSeconds(),
             entry.expiresAt(),
             OffsetToken.ofRecordOffset(Math.max(stream.startOffset(), 0)),
-            OffsetToken.ofRecordOffset(stream.nextOffset()),
+            OffsetToken.ofRecordOffset(stream.confirmOffset()),
             entry.closed(),
             ownerNodeId(entry.streamId()).orElse(null));
     }

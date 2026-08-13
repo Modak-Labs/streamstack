@@ -57,7 +57,8 @@ public final class ProtocolConverter {
             request.contentType(),
             streamSeq,
             producer,
-            request.close());
+            request.close(),
+            true);
     }
 
     public static AppendResponse toAppendResponse(AppendResult result) {

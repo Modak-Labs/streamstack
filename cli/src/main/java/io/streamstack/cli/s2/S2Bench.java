@@ -33,11 +33,14 @@ public final class S2Bench implements Callable<Integer> {
     @Option(names = {"-b", "--record-size"}, defaultValue = "1024")
     int recordSize;
 
-    @Option(names = {"-t", "--target-mibps"}, defaultValue = "1")
+    @Option(names = {"-t", "--target-mibps"}, defaultValue = "0", description = "throttle writes (0 = unthrottled)")
     double targetMibps;
 
     @Option(names = {"-d", "--duration"}, defaultValue = "15")
     int durationSec;
+
+    @Option(names = {"-n", "--batch-size"}, defaultValue = "0", description = "records per append batch (0 = client max)")
+    int batchSize;
 
     @Override
     public Integer call() throws Exception {
@@ -87,20 +90,26 @@ public final class S2Bench implements Callable<Integer> {
 
             long start = System.nanoTime();
             long deadline = start + TimeUnit.SECONDS.toNanos(durationSec);
-            double targetBps = Math.max(targetMibps, 0.01) * 1024 * 1024;
+            double targetBps = targetMibps > 0 ? targetMibps * 1024 * 1024 : 0;
             long sent = 0;
 
             try (Producer producer = stream.producer()) {
+                if (batchSize > 0) {
+                    producer.maxRecords(batchSize);
+                }
+
                 while (System.nanoTime() < deadline) {
                     producer.submit(new AppendRecord(null, null, body));
-                    producer.flush();
                     sent += body.length;
                     writeStats.add(body.length);
-                    long expected = (long) (sent / targetBps * 1_000_000_000L);
-                    long elapsed = System.nanoTime() - start;
 
-                    if (expected > elapsed) {
-                        TimeUnit.NANOSECONDS.sleep(expected - elapsed);
+                    if (targetBps > 0) {
+                        long expected = (long) (sent / targetBps * 1_000_000_000L);
+                        long elapsed = System.nanoTime() - start;
+
+                        if (expected > elapsed) {
+                            TimeUnit.NANOSECONDS.sleep(expected - elapsed);
+                        }
                     }
                 }
             }

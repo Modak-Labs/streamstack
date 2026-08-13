@@ -2,7 +2,7 @@ package io.streamstack.s2.client;
 
 import java.util.Objects;
 
-import io.streamstack.s2.client.internal.SseParser;
+import io.streamstack.s2.client.helper.SseParser;
 import io.streamstack.s2.model.Format;
 import io.streamstack.s2.model.S2Json;
 import io.streamstack.s2.model.exception.S2Exception;

@@ -1,6 +1,4 @@
-package io.streamstack.server.service;
-
-import io.streamstack.server.model.OffsetToken;
+package io.streamstack.server.model;
 
 public final class StreamServiceException extends Exception {
 

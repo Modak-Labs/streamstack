@@ -1,6 +1,6 @@
 package io.streamstack.s2.client;
 
-import io.streamstack.s2.client.internal.HttpTransport;
+import io.streamstack.s2.client.helper.HttpTransport;
 import io.streamstack.s2.model.Protocol;
 import io.streamstack.s2.model.request.AppendRequest;
 import io.streamstack.s2.model.request.ReadRequest;

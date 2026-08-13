@@ -1,4 +1,4 @@
-package io.streamstack.s2.client.internal;
+package io.streamstack.s2.client.helper;
 
 import io.streamstack.s2.model.Format;
 import io.streamstack.s2.model.Protocol;

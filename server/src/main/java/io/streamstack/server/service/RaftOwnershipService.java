@@ -5,6 +5,7 @@ import io.streamstack.s3.metadata.StreamMetadata;
 import io.streamstack.s3.metadata.StreamState;
 import io.streamstack.server.model.NodeMeta;
 import io.streamstack.server.model.Owner;
+import io.streamstack.server.model.StreamServiceException;
 
 import java.util.List;
 import java.util.Objects;

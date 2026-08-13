@@ -12,7 +12,7 @@ import io.streamstack.model.response.ReadResponse;
 import io.streamstack.server.model.OffsetToken;
 import io.streamstack.server.model.StreamMeta;
 import io.streamstack.server.service.StreamService;
-import io.streamstack.server.service.StreamServiceException;
+import io.streamstack.server.model.StreamServiceException;
 
 import java.io.OutputStream;
 import java.net.URI;

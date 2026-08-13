@@ -2,6 +2,7 @@ package io.streamstack.server.service;
 
 import io.streamstack.server.model.OffsetToken;
 import io.streamstack.server.model.ReadResult;
+import io.streamstack.server.model.StreamServiceException;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
