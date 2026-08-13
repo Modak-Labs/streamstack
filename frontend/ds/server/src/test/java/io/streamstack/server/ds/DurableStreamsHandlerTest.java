@@ -452,7 +452,8 @@ public class DurableStreamsHandlerTest {
 
             StreamMeta meta() {
                 return new StreamMeta(name, streamId, contentType, ttlSeconds, expiresAt,
-                    OffsetToken.ofRecordOffset(startOffset), OffsetToken.ofRecordOffset(nextOffset), closed, 1);
+                    OffsetToken.ofRecordOffset(startOffset), OffsetToken.ofRecordOffset(nextOffset),
+                    OffsetToken.ofRecordOffset(nextOffset), closed);
             }
         }
     }

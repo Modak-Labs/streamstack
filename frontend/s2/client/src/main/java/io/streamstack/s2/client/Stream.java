@@ -9,6 +9,7 @@ import io.streamstack.s2.model.response.ReadResponse;
 import io.streamstack.s2.model.response.TailResponse;
 
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 
 public final class Stream {
 
@@ -39,6 +40,13 @@ public final class Stream {
 
     public AppendResponse append(AppendRequest request) {
         return transport.execute(
+            transport.withBasin(transport.request(recordsPath()), basin).POST(transport.jsonBody(request)),
+            AppendResponse.class,
+            200);
+    }
+
+    public CompletableFuture<AppendResponse> appendAsync(AppendRequest request) {
+        return transport.executeAsync(
             transport.withBasin(transport.request(recordsPath()), basin).POST(transport.jsonBody(request)),
             AppendResponse.class,
             200);

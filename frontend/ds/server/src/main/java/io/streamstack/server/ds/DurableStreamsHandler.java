@@ -95,6 +95,7 @@ public final class DurableStreamsHandler {
                     ctx.result(Objects.isNull(e.getMessage()) ? "Producer sequence gap" : e.getMessage());
                 }
                 case CONFLICT, CLOSED -> respond(ctx, 409, e.nextOffset(), e.closed());
+                case DURABILITY -> fail(ctx, 500, e.getMessage());
             }
         } catch (IllegalArgumentException e) {
             if (abortIfCommitted(ctx)) {

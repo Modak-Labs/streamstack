@@ -19,6 +19,7 @@ import io.streamstack.s3.metadata.StreamMetadata;
 import io.streamstack.s3.metadata.StreamState;
 import io.streamstack.server.BatchFraming;
 import io.streamstack.server.ContentTypes;
+import io.streamstack.server.StreamPending;
 import io.streamstack.server.StreamWaiterRegistry;
 import io.streamstack.server.model.AppendCommand;
 import io.streamstack.server.model.AppendResult;
@@ -31,6 +32,7 @@ import io.streamstack.server.model.StreamMeta;
 import io.streamstack.server.model.OffsetToken;
 import io.streamstack.server.model.StreamRecord;
 import io.streamstack.server.model.StreamServiceException;
+import io.streamstack.server.model.SubmittedAppendResult;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -45,6 +47,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -64,7 +67,9 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
     private final ConcurrentHashMap<Long, AtomicLong> localEpochs = new ConcurrentHashMap<>();
 
-    private final ConcurrentHashMap<String, Object> nameLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, StreamPending> pendingByName = new ConcurrentHashMap<>();
+
+    private final ConcurrentHashMap<String, RegistryEntry> entryCache = new ConcurrentHashMap<>();
 
     public S3StreamService(
         StreamClient streamClient,
@@ -80,9 +85,8 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     @Override
     public CreateResult create(CreateCommand command) throws StreamServiceException {
         String name = normalize(command.name());
-        Object lock = nameLocks.computeIfAbsent(name, n -> new Object());
 
-        synchronized (lock) {
+        synchronized (pendingOf(name)) {
             try {
                 RegistryEntry existing = getEntry(name, false);
 
@@ -103,6 +107,8 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                 Value stored = kvClient.putKVIfAbsent(KeyValue.of(name, ByteBuffer.wrap(candidate.encode())))
                     .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
                 RegistryEntry current = RegistryEntry.decode(toBytes(stored));
+
+                entryCache.put(name, current);
 
                 if (current.streamId() != candidate.streamId()) {
                     return resolveLostRace(name, stream, current, command);
@@ -147,9 +153,8 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     @Override
     public boolean delete(String name) throws StreamServiceException {
         String normalized = normalize(name);
-        Object lock = nameLocks.computeIfAbsent(normalized, n -> new Object());
 
-        synchronized (lock) {
+        synchronized (pendingOf(normalized)) {
             try {
                 RegistryEntry entry = getEntry(normalized, false);
 
@@ -159,11 +164,14 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
                 Value deleted = kvClient.delKV(Key.of(normalized)).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
 
+                entryCache.remove(normalized);
+
                 if (Objects.isNull(deleted)) {
                     return false;
                 }
 
                 destroyStream(entry.streamId());
+                pendingOf(normalized).reset();
                 waiters.notifyClosed(normalized);
 
                 return true;
@@ -176,9 +184,8 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     @Override
     public long trim(String name, long newStartOffset) throws StreamServiceException {
         String normalized = normalize(name);
-        Object lock = nameLocks.computeIfAbsent(normalized, n -> new Object());
 
-        synchronized (lock) {
+        synchronized (pendingOf(normalized)) {
             try {
                 RegistryEntry entry = getEntry(normalized, false);
 
@@ -209,12 +216,15 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
     @Override
     public AppendResult append(AppendCommand command) throws StreamServiceException {
-        String name = normalize(command.name());
-        Object lock = nameLocks.computeIfAbsent(name, n -> new Object());
-        List<CompletableFuture<?>> submitted;
-        AppendResult result;
+        return submit(command).await(Duration.ofSeconds(OP_TIMEOUT_SEC));
+    }
 
-        synchronized (lock) {
+    @Override
+    public SubmittedAppendResult submit(AppendCommand command) throws StreamServiceException {
+        String name = normalize(command.name());
+        StreamPending pending = pendingOf(name);
+
+        synchronized (pending) {
             try {
                 RegistryEntry entry = getEntry(name, false);
 
@@ -222,39 +232,71 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                     throw new StreamServiceException(StreamServiceException.Kind.NOT_FOUND);
                 }
 
+                if (pending.poisoned()) {
+                    pending.reset();
+                    openStreams.remove(entry.streamId());
+                }
+
                 Stream stream = ensureOpen(entry.streamId());
                 OffsetToken next = OffsetToken.ofRecordOffset(stream.nextOffset());
                 ProducerDecision producer = validateProducer(entry, command);
 
                 if (Objects.nonNull(producer) && producer.status() != ProducerDecision.Status.ACCEPTED) {
-                    return handleProducerReject(entry, next, producer, command);
+                    return SubmittedAppendResult.completed(handleProducerReject(entry, next, producer, command));
                 }
 
                 if (entry.closed()) {
-                    return appendToClosed(entry, command, producer, next);
+                    return SubmittedAppendResult.completed(appendToClosed(entry, command, producer, next));
                 }
 
                 boolean closeOnly = command.concatenatedPayload().length == 0 && command.closeAfter();
 
                 validatePayload(entry, command, producer, next, closeOnly);
 
-                if (closeOnly) {
-                    submitted = List.of();
-                } else {
-                    submitted = submitPayloads(stream, entry, command);
+                long baseOffset = next.recordOffset();
+                List<byte[]> messages = closeOnly
+                    ? List.of()
+                    : expandPayloads(entry.contentType(), command.payloads());
+                List<CompletableFuture<?>> submitted = submitMessages(stream, messages, command.atomic());
+
+                if (!messages.isEmpty()) {
                     next = OffsetToken.ofRecordOffset(stream.nextOffset());
                 }
 
+                long streamId = entry.streamId();
+                CompletableFuture<Void> gate = pending.enqueue(submitted, () -> openStreams.remove(streamId));
                 RegistryEntry updated = applyAppendState(entry, command, producer);
                 Long echoedSeq = command.hasProducer() ? command.producer().seq() : null;
                 Long echoedEpoch = command.hasProducer() ? command.producer().epoch() : null;
 
+                AppendResult result = new AppendResult(next, !closeOnly, command.closeAfter(), echoedEpoch, echoedSeq);
+                long notifyOffset = next.recordOffset();
+
                 if (command.closeAfter()) {
-                    awaitSubmitted(name, submitted, next);
+                    new SubmittedAppendResult(result, gate.thenApply(v -> result))
+                        .await(Duration.ofSeconds(OP_TIMEOUT_SEC));
+
+                    if (!closeOnly) {
+                        pending.recordAppend(baseOffset, messages);
+                        waiters.notifyAppend(name, notifyOffset);
+                    }
+
                     closeEntry(name, updated, command);
 
-                    return new AppendResult(next, !closeOnly, true, echoedEpoch, echoedSeq);
+                    return SubmittedAppendResult.completed(result);
                 }
+
+                CompletableFuture<AppendResult> durable = gate.handle((v, t) -> {
+                    if (Objects.nonNull(t)) {
+                        throw new CompletionException(t);
+                    }
+
+                    pending.recordAppend(baseOffset, messages);
+                    waiters.notifyAppend(name, notifyOffset);
+
+                    return result;
+                });
+                SubmittedAppendResult submittedResult = new SubmittedAppendResult(result, durable);
 
                 updated = touchDeadline(updated);
 
@@ -262,29 +304,25 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
                     putEntry(name, updated);
                 }
 
-                result = new AppendResult(next, !closeOnly, false, echoedEpoch, echoedSeq);
+                return submittedResult;
             } catch (StreamServiceException e) {
                 throw e;
             } catch (Exception e) {
                 throw wrap(e);
             }
         }
+    }
 
-        try {
-            awaitSubmitted(name, submitted, result.nextOffset());
-        } catch (Exception e) {
-            throw wrap(e);
-        }
-
-        return result;
+    private StreamPending pendingOf(String name) {
+        return pendingByName.computeIfAbsent(name, n -> new StreamPending());
     }
 
     @Override
     public ReadResult read(String name, OffsetToken from, int maxBytes, int maxRecords) throws StreamServiceException {
         name = normalize(name);
-        Object lock = nameLocks.computeIfAbsent(name, n -> new Object());
+        StreamPending pending = pendingOf(name);
 
-        synchronized (lock) {
+        synchronized (pending) {
             try {
                 RegistryEntry entry = getEntry(name, true);
 
@@ -307,6 +345,12 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
                 maxBytes = maxBytes > 0 ? maxBytes : Integer.MAX_VALUE;
                 maxRecords = maxRecords > 0 ? maxRecords : Integer.MAX_VALUE;
+
+                List<StreamRecord> cached = pending.tailRecords(start);
+
+                if (Objects.nonNull(cached)) {
+                    return tailRead(entry, cached, end, maxBytes, maxRecords);
+                }
 
                 return fetchRecords(entry, stream, start, end, maxBytes, maxRecords);
             } catch (StreamServiceException e) {
@@ -359,17 +403,6 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         return Objects.isNull(entry) ? OptionalLong.empty() : OptionalLong.of(entry.streamId());
     }
 
-    public Optional<Integer> ownerNodeId(long streamId) throws Exception {
-        List<StreamMetadata> streams = metadataNode.client().readIndex(() ->
-            metadataNode.stateMachine().streamControlManager().getStreams(List.of(streamId)))
-            .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
-        if (streams.isEmpty() || streams.get(0).state() != StreamState.OPENED) {
-            return Optional.empty();
-        }
-
-        return Optional.of(streams.get(0).nodeId());
-    }
-
     public Collection<Stream> openStreamSnapshot() {
         return List.copyOf(openStreams.values());
     }
@@ -385,6 +418,40 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         }
 
         openStreams.clear();
+    }
+
+    private ReadResult tailRead(
+        RegistryEntry entry,
+        List<StreamRecord> cached,
+        long end,
+        int maxBytes,
+        int maxRecords) {
+        List<StreamRecord> records = new ArrayList<>();
+        int total = 0;
+        long next = cached.get(0).offset().recordOffset();
+
+        for (StreamRecord record : cached) {
+            if (record.offset().recordOffset() >= end) {
+                break;
+            }
+
+            byte[] bytes = record.payload();
+
+            if (total + bytes.length > maxBytes && total > 0) {
+                break;
+            }
+
+            records.add(record);
+            total += bytes.length;
+            next = record.offset().recordOffset() + 1;
+
+            if (total >= maxBytes || records.size() >= maxRecords) {
+                break;
+            }
+        }
+
+        return new ReadResult(records, entry.contentType(), OffsetToken.ofRecordOffset(next),
+            next >= end, entry.closed());
     }
 
     private ReadResult fetchRecords(
@@ -563,11 +630,12 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         }
     }
 
-    private List<CompletableFuture<?>> submitPayloads(Stream stream, RegistryEntry entry, AppendCommand command)
-        throws StreamServiceException {
-        List<byte[]> messages = expandPayloads(entry.contentType(), command.payloads());
+    private List<CompletableFuture<?>> submitMessages(Stream stream, List<byte[]> messages, boolean atomic) {
+        if (messages.isEmpty()) {
+            return List.of();
+        }
 
-        if (command.atomic() && messages.size() > 1) {
+        if (atomic && messages.size() > 1) {
             return List.of(submitFramedBatch(stream, messages));
         }
 
@@ -796,13 +864,18 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     }
 
     private RegistryEntry getEntry(String name, boolean touch) throws Exception {
-        Value value = kvClient.getKV(Key.of(name)).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+        RegistryEntry entry = entryCache.get(name);
 
-        if (Objects.isNull(value) || value.isNull()) {
-            return null;
+        if (Objects.isNull(entry)) {
+            Value value = kvClient.getKV(Key.of(name)).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+
+            if (Objects.isNull(value) || value.isNull()) {
+                return null;
+            }
+
+            entry = RegistryEntry.decode(toBytes(value));
+            entryCache.put(name, entry);
         }
-
-        RegistryEntry entry = RegistryEntry.decode(toBytes(value));
 
         if (entry.deadlineMs() > 0 && System.currentTimeMillis() > entry.deadlineMs()) {
             expire(name, entry);
@@ -827,7 +900,10 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         } catch (Exception ignored) {
         }
 
+        entryCache.remove(name);
+
         destroyStream(entry.streamId());
+        pendingOf(name).reset();
         waiters.notifyClosed(name);
     }
 
@@ -861,6 +937,7 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     private void putEntry(String name, RegistryEntry entry) throws Exception {
         kvClient.putKV(KeyValue.of(name, ByteBuffer.wrap(entry.encode())))
             .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+        entryCache.put(name, entry);
     }
 
     private static RegistryEntry touchDeadline(RegistryEntry entry) {
@@ -904,8 +981,8 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
             entry.expiresAt(),
             OffsetToken.ofRecordOffset(Math.max(stream.startOffset(), 0)),
             OffsetToken.ofRecordOffset(stream.confirmOffset()),
-            entry.closed(),
-            ownerNodeId(entry.streamId()).orElse(null));
+            OffsetToken.ofRecordOffset(stream.nextOffset()),
+            entry.closed());
     }
 
     private static boolean configMatches(

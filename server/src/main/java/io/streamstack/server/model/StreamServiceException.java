@@ -1,8 +1,10 @@
 package io.streamstack.server.model;
 
+import java.util.Objects;
+
 public final class StreamServiceException extends Exception {
 
-    public enum Kind { NOT_FOUND, CONFLICT, CLOSED, BAD_REQUEST, FENCED, SEQUENCE_GAP }
+    public enum Kind { NOT_FOUND, CONFLICT, CLOSED, BAD_REQUEST, FENCED, SEQUENCE_GAP, DURABILITY }
     private final Kind kind;
     private final OffsetToken nextOffset;
     private final boolean closed;
@@ -46,6 +48,18 @@ public final class StreamServiceException extends Exception {
     public static StreamServiceException sequenceGap(long expected, long received) {
         return new StreamServiceException(
             Kind.SEQUENCE_GAP, null, false, null, expected, received, "Producer sequence gap");
+    }
+
+    public static StreamServiceException durability(Throwable cause) {
+        if (cause instanceof StreamServiceException se) {
+            return se;
+        }
+
+        String message = Objects.isNull(cause)
+            ? "append not durable"
+            : "append not durable: " + cause.getMessage();
+
+        return new StreamServiceException(Kind.DURABILITY, null, false, message);
     }
 
     public Kind kind() {

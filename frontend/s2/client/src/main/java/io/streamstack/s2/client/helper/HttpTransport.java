@@ -5,6 +5,7 @@ import io.streamstack.s2.model.Protocol;
 import io.streamstack.s2.model.S2Json;
 import io.streamstack.s2.model.exception.S2Exception;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -14,6 +15,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 public final class HttpTransport implements AutoCloseable {
 
@@ -65,14 +68,8 @@ public final class HttpTransport implements AutoCloseable {
             try {
                 HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
 
-                for (int status : expected) {
-                    if (response.statusCode() == status) {
-                        if (type == Void.class || response.body().length == 0) {
-                            return null;
-                        }
-
-                        return S2Json.read(response.body(), type, format);
-                    }
+                if (isExpected(response.statusCode(), expected)) {
+                    return parseBody(response, type);
                 }
 
                 if (idempotent && retryPolicy.retryable(response.statusCode()) && attempt < retryPolicy.maxRetries()) {
@@ -101,6 +98,33 @@ public final class HttpTransport implements AutoCloseable {
                 throw S2Exception.unavailable(e.getMessage());
             }
         }
+    }
+
+    public <T> CompletableFuture<T> executeAsync(HttpRequest.Builder builder, Class<T> type, int... expected) {
+        return httpClient.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
+            .handle((response, failure) -> {
+                if (Objects.nonNull(failure)) {
+                    Throwable cause = failure instanceof CompletionException && Objects.nonNull(failure.getCause())
+                        ? failure.getCause()
+                        : failure;
+
+                    if (cause instanceof S2Exception s2) {
+                        throw s2;
+                    }
+
+                    throw S2Exception.unavailable(cause.getMessage());
+                }
+
+                if (isExpected(response.statusCode(), expected)) {
+                    try {
+                        return parseBody(response, type);
+                    } catch (IOException e) {
+                        throw S2Exception.unavailable(e.getMessage());
+                    }
+                }
+
+                throw ErrorMapper.map(response.statusCode(), response.body());
+            });
     }
 
     public InputStream executeStream(HttpRequest.Builder builder) {
@@ -139,6 +163,24 @@ public final class HttpTransport implements AutoCloseable {
         }
 
         query.append(name).append('=').append(encode(String.valueOf(value)));
+    }
+
+    private static boolean isExpected(int statusCode, int[] expected) {
+        for (int status : expected) {
+            if (statusCode == status) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private <T> T parseBody(HttpResponse<byte[]> response, Class<T> type) throws IOException {
+        if (type == Void.class || response.body().length == 0) {
+            return null;
+        }
+
+        return S2Json.read(response.body(), type, format);
     }
 
     private static void sleep(Duration delay) throws InterruptedException {

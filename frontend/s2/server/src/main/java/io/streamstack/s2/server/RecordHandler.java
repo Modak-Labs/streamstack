@@ -21,10 +21,10 @@ import io.streamstack.s2.model.response.ReadResponse;
 import io.streamstack.s2.model.response.SequencedRecord;
 import io.streamstack.s2.model.response.TailResponse;
 import io.streamstack.server.model.AppendCommand;
-import io.streamstack.server.model.AppendResult;
 import io.streamstack.server.model.OffsetToken;
 import io.streamstack.server.model.StreamMeta;
 import io.streamstack.server.model.StreamRecord;
+import io.streamstack.server.model.SubmittedAppendResult;
 import io.streamstack.server.service.StreamService;
 import io.streamstack.server.model.StreamServiceException;
 
@@ -38,6 +38,8 @@ import java.util.List;
 public final class RecordHandler {
 
     private static final int CORE_READ_MAX_BYTES = 4 * 1024 * 1024;
+    private static final Duration DURABILITY_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration APPEND_ORDER_TIMEOUT = Duration.ofSeconds(5);
     private final StreamService service;
     private final BasinRegistry registry;
     private final StreamHandler streams;
@@ -77,16 +79,27 @@ public final class RecordHandler {
             mapper, sc.streamDoc().get("config"), sc.basinDoc().get("config"));
         Object lock = state.lock(sc.coreName());
         AppendResponse response;
+        SubmittedAppendResult submitted;
 
         synchronized (lock) {
             StreamMeta meta = head(sc);
-            long tailSeq = meta.nextOffset().recordOffset();
+            long tailSeq = meta.submittedOffset().recordOffset();
+
+            if (Objects.nonNull(request.matchSeqNum()) && request.matchSeqNum() > tailSeq) {
+                long deadline = System.nanoTime() + APPEND_ORDER_TIMEOUT.toNanos();
+
+                while (request.matchSeqNum() > tailSeq && System.nanoTime() < deadline) {
+                    lock.wait(Math.max(1, (deadline - System.nanoTime()) / 1_000_000));
+                    meta = head(sc);
+                    tailSeq = meta.submittedOffset().recordOffset();
+                }
+            }
 
             checkPreconditions(request, sc, tailSeq);
             PreparedBatch batch = prepareBatch(request, resolved, lastTimestamp(sc.coreName(), tailSeq));
-            AppendResult result = service.append().append(new AppendCommand(
+            submitted = service.append().submit(new AppendCommand(
                 sc.coreName(), batch.payloads(), StreamHandler.CORE_CONTENT_TYPE, null, null, false, true));
-            long end = result.nextOffset().recordOffset();
+            long end = submitted.result().nextOffset().recordOffset();
             long start = end - request.records().size();
 
             state.cacheTimestamp(sc.coreName(), batch.lastTimestamp());
@@ -95,8 +108,10 @@ public final class RecordHandler {
                 new StreamPosition(start, batch.firstTimestamp()),
                 new StreamPosition(end, batch.lastTimestamp()),
                 new StreamPosition(end, batch.lastTimestamp()));
+            lock.notifyAll();
         }
 
+        submitted.await(DURABILITY_TIMEOUT);
         Requests.json(ctx, 200, response, format);
     }
 
@@ -181,6 +196,8 @@ public final class RecordHandler {
         ctx.header(Protocol.H_CACHE_CONTROL, "no-cache, no-transform");
         ctx.header("x-accel-buffering", "no");
         OutputStream out = ctx.res().getOutputStream();
+
+        ctx.res().flushBuffer();
         long offset = start;
         long deadline = System.nanoTime() + sseMaxDuration.toNanos();
         long lastPingNanos = System.nanoTime();

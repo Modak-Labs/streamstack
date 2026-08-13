@@ -15,6 +15,7 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.ParentCommand;
 
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -41,6 +42,10 @@ public final class S2Bench implements Callable<Integer> {
 
     @Option(names = {"-n", "--batch-size"}, defaultValue = "0", description = "records per append batch (0 = client max)")
     int batchSize;
+
+    @Option(names = {"-w", "--in-flight-mib"}, defaultValue = "16",
+        description = "max in-flight append MiB (0 = serial appends)")
+    int inFlightMib;
 
     @Override
     public Integer call() throws Exception {
@@ -98,6 +103,12 @@ public final class S2Bench implements Callable<Integer> {
                     producer.maxRecords(batchSize);
                 }
 
+                if (inFlightMib > 0) {
+                    producer.maxInFlightBytes((long) inFlightMib * 1024 * 1024);
+                }
+
+                producer.matchSeqNum(0L);
+
                 while (System.nanoTime() < deadline) {
                     producer.submit(new AppendRecord(null, null, body));
                     sent += body.length;
@@ -112,6 +123,17 @@ public final class S2Bench implements Callable<Integer> {
                         }
                     }
                 }
+            } catch (RuntimeException e) {
+                Throwable cause = e;
+
+                while (Objects.nonNull(cause.getCause()) && cause.getCause() != cause) {
+                    cause = cause.getCause();
+                }
+
+                Io.err("write failed: " + cause);
+                stop.set(true);
+
+                return 1;
             }
 
             stop.set(true);

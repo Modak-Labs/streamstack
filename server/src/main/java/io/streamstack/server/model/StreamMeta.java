@@ -10,6 +10,6 @@ public record StreamMeta(
     Instant expiresAt,
     OffsetToken startOffset,
     OffsetToken nextOffset,
-    boolean closed,
-    Integer ownerNodeId) {
+    OffsetToken submittedOffset,
+    boolean closed) {
 }

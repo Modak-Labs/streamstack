@@ -25,6 +25,8 @@ public final class S2Server implements AutoCloseable {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(S2Server.class);
 
+    private static final long MAX_REQUEST_SIZE = 32L * 1024 * 1024;
+
     private final ServerConfig config;
     private final StreamStackNode node;
     private final Javalin app;
@@ -47,6 +49,7 @@ public final class S2Server implements AutoCloseable {
         this.app = Javalin.create(cfg -> {
             cfg.showJavalinBanner = false;
             cfg.useVirtualThreads = true;
+            cfg.http.maxRequestSize = MAX_REQUEST_SIZE;
         });
 
         app.get("/health", ctx -> {
@@ -79,6 +82,7 @@ public final class S2Server implements AutoCloseable {
             switch (e.kind()) {
                 case NOT_FOUND -> write(ctx, 404, new ErrorResponse("stream_not_found", "stream not found"));
                 case BAD_REQUEST -> write(ctx, 422, new ErrorResponse("invalid", e.getMessage()));
+                case DURABILITY -> write(ctx, 500, new ErrorResponse("append_not_durable", e.getMessage()));
                 default -> write(ctx, 409, new ErrorResponse("transaction_conflict",
                     Objects.isNull(e.getMessage()) ? "conflict" : e.getMessage()));
             }
