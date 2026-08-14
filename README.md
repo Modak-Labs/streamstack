@@ -40,6 +40,14 @@ docker compose --env-file harness/configs/.env \
 
 Swap `docker-compose.ds.yml` for `docker-compose.s2.yml` to run S2 facade. Node listens on `127.0.0.1:4437`.
 
+Multi-Node (3 nodes) cluster (ports 4437–4439):
+
+```bash
+docker compose --env-file harness/configs/.env \
+  -f harness/docker/docker-compose.cluster.ds.yml \
+  up -d --build
+```
+
 ## License
 
 Apache 2.0.

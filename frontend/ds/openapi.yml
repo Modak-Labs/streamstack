@@ -1,0 +1,313 @@
+openapi: 3.1.0
+info:
+  title: Durable Streams
+  version: "1.0"
+  license:
+    name: Apache 2.0
+servers:
+  - url: http://127.0.0.1:4437
+paths:
+  /{stream}:
+    parameters:
+      - name: stream
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      operationId: create
+      summary: Create stream
+      parameters:
+        - name: Content-Type
+          in: header
+          schema:
+            type: string
+        - name: Stream-TTL
+          in: header
+          schema:
+            type: string
+            pattern: "^(0|[1-9][0-9]*)$"
+        - name: Stream-Expires-At
+          in: header
+          schema:
+            type: string
+            format: date-time
+        - name: Stream-Closed
+          in: header
+          schema:
+            type: string
+            enum: ["true"]
+      requestBody:
+        content:
+          "*/*":
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+            Stream-Next-Offset:
+              $ref: "#/components/headers/Stream-Next-Offset"
+            Stream-Closed:
+              $ref: "#/components/headers/Stream-Closed"
+        "200":
+          description: Exists
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            Stream-Next-Offset:
+              $ref: "#/components/headers/Stream-Next-Offset"
+            Stream-Closed:
+              $ref: "#/components/headers/Stream-Closed"
+        "400":
+          $ref: "#/components/responses/Plain"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    post:
+      operationId: append
+      summary: Append or close
+      parameters:
+        - name: Content-Type
+          in: header
+          schema:
+            type: string
+        - name: Stream-Closed
+          in: header
+          schema:
+            type: string
+            enum: ["true"]
+        - name: Stream-Seq
+          in: header
+          schema:
+            type: string
+        - name: Producer-Id
+          in: header
+          schema:
+            type: string
+            minLength: 1
+        - name: Producer-Epoch
+          in: header
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+        - name: Producer-Seq
+          in: header
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+      requestBody:
+        content:
+          "*/*":
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Producer append
+          headers:
+            Stream-Next-Offset:
+              $ref: "#/components/headers/Stream-Next-Offset"
+            Stream-Closed:
+              $ref: "#/components/headers/Stream-Closed"
+            Producer-Epoch:
+              schema:
+                type: string
+            Producer-Seq:
+              schema:
+                type: string
+        "204":
+          description: Appended, closed, or duplicate
+          headers:
+            Stream-Next-Offset:
+              $ref: "#/components/headers/Stream-Next-Offset"
+            Stream-Closed:
+              $ref: "#/components/headers/Stream-Closed"
+            Producer-Epoch:
+              schema:
+                type: string
+            Producer-Seq:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/Plain"
+        "403":
+          description: Stale epoch
+          headers:
+            Producer-Epoch:
+              schema:
+                type: string
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Conflict
+          headers:
+            Stream-Next-Offset:
+              $ref: "#/components/headers/Stream-Next-Offset"
+            Stream-Closed:
+              $ref: "#/components/headers/Stream-Closed"
+            Producer-Expected-Seq:
+              schema:
+                type: string
+            Producer-Received-Seq:
+              schema:
+                type: string
+          content:
+            text/plain:
+              schema:
+                type: string
+        "413":
+          $ref: "#/components/responses/Plain"
+    get:
+      operationId: read
+      summary: Read stream
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: string
+        - name: live
+          in: query
+          schema:
+            type: string
+            enum: [long-poll, sse]
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Data or SSE
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Stream-Next-Offset:
+              $ref: "#/components/headers/Stream-Next-Offset"
+            Stream-Up-To-Date:
+              $ref: "#/components/headers/Stream-Up-To-Date"
+            Stream-Closed:
+              $ref: "#/components/headers/Stream-Closed"
+            Stream-Cursor:
+              schema:
+                type: string
+            Stream-SSE-Data-Encoding:
+              schema:
+                type: string
+                enum: [base64]
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: array
+            text/event-stream:
+              schema:
+                type: string
+        "204":
+          description: Long-poll timeout
+          headers:
+            Stream-Next-Offset:
+              $ref: "#/components/headers/Stream-Next-Offset"
+            Stream-Up-To-Date:
+              $ref: "#/components/headers/Stream-Up-To-Date"
+            Stream-Closed:
+              $ref: "#/components/headers/Stream-Closed"
+            Stream-Cursor:
+              schema:
+                type: string
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/Plain"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    head:
+      operationId: head
+      summary: Stream metadata
+      responses:
+        "200":
+          description: Exists
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            Stream-Next-Offset:
+              $ref: "#/components/headers/Stream-Next-Offset"
+            Stream-TTL:
+              schema:
+                type: string
+            Stream-Expires-At:
+              schema:
+                type: string
+                format: date-time
+            Stream-Closed:
+              $ref: "#/components/headers/Stream-Closed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: delete
+      summary: Delete stream
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+    options:
+      operationId: options
+      summary: CORS
+      responses:
+        "204":
+          description: ""
+components:
+  headers:
+    Stream-Next-Offset:
+      schema:
+        type: string
+    Stream-Up-To-Date:
+      schema:
+        type: string
+        enum: ["true"]
+    Stream-Closed:
+      schema:
+        type: string
+        enum: ["true"]
+  responses:
+    NotFound:
+      description: Not found
+    Conflict:
+      description: Conflict
+      headers:
+        Stream-Next-Offset:
+          $ref: "#/components/headers/Stream-Next-Offset"
+        Stream-Closed:
+          $ref: "#/components/headers/Stream-Closed"
+    Plain:
+      description: Error
+      content:
+        text/plain:
+          schema:
+            type: string
