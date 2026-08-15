@@ -1,3 +1,4 @@
+# Three nodes on one host (ports 4437–4439 / 8091–8093). MinIO at 127.0.0.1:9000 (host network).
 global:
   clusterName: cluster
   storage: 0@s3://streams-data?region=us-east-1&endpoint=http://127.0.0.1:9000&pathStyle=true

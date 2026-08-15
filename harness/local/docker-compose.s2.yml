@@ -7,19 +7,17 @@ services:
         MODULE: frontend/s2/server
         JAR: s2-server.jar
     env_file:
-      - path: ../configs/.env
+      - path: .env
         required: false
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      TOPO: ${TOPO}
+      TOPO: /opt/streamstack/topo/topo.yaml
       NODE_ID: "1"
-      DATA_BUCKET: ${DATA_BUCKET:-}
-      WAL_BUCKET: ${WAL_BUCKET:-}
     volumes:
-      - ../configs:/opt/streamstack/harness/configs:ro
+      - .:/opt/streamstack/topo:ro
       - node1-data:/tmp/streamstack
     ports:
       - "4437:4437"

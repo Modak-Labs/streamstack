@@ -1,3 +1,4 @@
+# Single node. Real S3 (no endpoint). DATA_BUCKET / WAL_BUCKET override the URIs.
 global:
   clusterName: aws
   storage: 0@s3://streamstack-data?region=us-east-1

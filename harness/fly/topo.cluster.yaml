@@ -1,0 +1,25 @@
+# Three Fly process groups (n1–n3). App name must stay streamstack. BUCKET_NAME overrides the URIs.
+global:
+  clusterName: streamstack
+  storage: 0@s3://streamstack-data?region=auto
+  wal: 0@s3://streamstack-wal?region=auto
+  config:
+    routing: LOCAL_ALWAYS
+    walCacheSize: 67108864
+    blockCacheSize: 67108864
+nodes:
+  - host: n1.process.streamstack.internal
+    nodeId: 1
+    httpPort: 4437
+    raftPort: 8091
+    dataDir: /data
+  - host: n2.process.streamstack.internal
+    nodeId: 2
+    httpPort: 4437
+    raftPort: 8091
+    dataDir: /data
+  - host: n3.process.streamstack.internal
+    nodeId: 3
+    httpPort: 4437
+    raftPort: 8091
+    dataDir: /data

@@ -1,0 +1,15 @@
+# Single Fly Machine. Tigris via AWS_ENDPOINT_URL_S3; BUCKET_NAME overrides the URIs.
+global:
+  clusterName: streamstack
+  storage: 0@s3://streamstack-data?region=auto
+  wal: 0@s3://streamstack-wal?region=auto
+  config:
+    routing: LOCAL_ALWAYS
+    walCacheSize: 67108864
+    blockCacheSize: 67108864
+nodes:
+  - host: fly-local-6pn
+    nodeId: 1
+    httpPort: 4437
+    raftPort: 8091
+    dataDir: /data

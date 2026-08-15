@@ -1,0 +1,38 @@
+app = "streamstack"
+primary_region = "iad"
+kill_timeout = 30
+
+[build]
+  dockerfile = "harness/docker/Dockerfile"
+
+[build.args]
+  MODULE = "frontend/ds/server"
+  JAR = "ds-server.jar"
+
+[deploy]
+  strategy = "rolling"
+  max_unavailable = 1
+
+[env]
+  TOPO = "/opt/streamstack/topo/fly.yaml"
+  NODE_ID = "1"
+  DATA_DIR = "/data"
+  ROUTING = "LOCAL_ALWAYS"
+  AWS_REGION = "auto"
+  JAVA_TOOL_OPTIONS = "-Djava.net.preferIPv6Addresses=true"
+
+[http_service]
+  internal_port = 4437
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+[mounts]
+  source = "streamstack"
+  destination = "/data"
+  initial_size = "1gb"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

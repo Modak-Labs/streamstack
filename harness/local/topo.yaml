@@ -1,3 +1,4 @@
+# Single node. MinIO on the Docker host (container → host.docker.internal:9000).
 global:
   clusterName: minio
   storage: 0@s3://streams-data?region=us-east-1&endpoint=http://host.docker.internal:9000&pathStyle=true
