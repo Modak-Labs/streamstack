@@ -341,13 +341,17 @@
 }
 
 .VPSidebarItem .item {
+  align-items: center;
   border-radius: var(--ss-radius);
 }
 
 .VPSidebarItem .link {
   min-height: 2.15rem;
   padding: 0.35rem 0.65rem;
-  border-radius: var(--ss-radius);
+}
+
+.VPSidebarItem .caret {
+  margin-right: 0.15rem !important;
 }
 
 .VPSidebarItem .text {
@@ -356,21 +360,23 @@
   gap: 0.55rem;
 }
 
-.VPSidebarItem .link:hover {
+.VPSidebarItem .item:hover {
   background: rgb(255 255 255 / 0.04);
 }
 
-.VPSidebarItem .link:hover .text,
-.VPSidebarItem .link:hover .ss-side-ico {
+.VPSidebarItem .item:hover .text,
+.VPSidebarItem .item:hover .ss-side-ico,
+.VPSidebarItem .item:hover .caret {
   color: var(--vp-c-brand-1) !important;
 }
 
-.VPSidebarItem.is-active > .item > .link {
+.VPSidebarItem.is-active > .item {
   background: var(--vp-c-brand-soft);
 }
 
 .VPSidebarItem.is-active > .item .link > .text,
-.VPSidebarItem.is-active .ss-side-ico {
+.VPSidebarItem.is-active > .item .ss-side-ico,
+.VPSidebarItem.is-active > .item .caret {
   color: var(--vp-c-brand-1) !important;
 }
 

@@ -29,7 +29,7 @@ docker compose --env-file harness/local/.env \
 
 Node listens on `127.0.0.1:4437`. MinIO, cluster, AWS, and Fly: [harness/README.md](harness/README.md).
 
-## Deployment (AWS)
+## Deployment
 
 Create data and WAL S3 buckets. Copy `harness/aws/.env.example` to `harness/aws/.env` and fill `AWS_*`, `DATA_BUCKET`, and `WAL_BUCKET`.
 

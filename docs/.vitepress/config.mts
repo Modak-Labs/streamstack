@@ -51,11 +51,26 @@ export default defineConfig({
         '/benchmark',
         '<path d="M3 16l5.2-5.2 3.6 3.6L21 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
       ),
-      sideItem(
-        'Deployment',
-        '/deployment',
-        '<path d="M12 3v10M8 7l4-4 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14.5v3A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
-      ),
+      {
+        ...sideItem(
+          'Deployment',
+          '/deployment',
+          '<path d="M12 3v10M8 7l4-4 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14.5v3A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+        ),
+        collapsed: false,
+        items: [
+          sideItem(
+            'AWS',
+            '/deployment/aws',
+            '<path d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 12v8.5M12 12 4 8M12 12l8-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+          ),
+          sideItem(
+            'Fly.io',
+            '/deployment/fly',
+            '<path d="M5 19L20 12L5 5l4.2 7L5 19Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9.2 12H20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+          ),
+        ],
+      },
     ],
     search: {
       provider: 'local',
