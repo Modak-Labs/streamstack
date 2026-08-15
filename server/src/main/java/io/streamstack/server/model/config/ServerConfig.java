@@ -32,6 +32,8 @@ public final class ServerConfig {
     private final int sseMaxDurationSec;
     private final int maxChunkSize;
     private final int shutdownDrainSec;
+    private final boolean metadataArchiveEnabled;
+    private final boolean restoreFromStorage;
     private final StreamConfig streamConfig;
     private final Map<String, String> envs;
 
@@ -53,6 +55,8 @@ public final class ServerConfig {
         this.sseMaxDurationSec = builder.sseMaxDurationSec;
         this.maxChunkSize = builder.maxChunkSize;
         this.shutdownDrainSec = builder.shutdownDrainSec;
+        this.metadataArchiveEnabled = builder.metadataArchiveEnabled;
+        this.restoreFromStorage = builder.restoreFromStorage;
         this.streamConfig = builder.streamConfig.build();
         this.envs = Map.copyOf(builder.envs);
     }
@@ -157,6 +161,14 @@ public final class ServerConfig {
         return shutdownDrainSec;
     }
 
+    public boolean metadataArchiveEnabled() {
+        return metadataArchiveEnabled;
+    }
+
+    public boolean restoreFromStorage() {
+        return restoreFromStorage;
+    }
+
     public StreamConfig streamConfig() {
         return streamConfig;
     }
@@ -218,6 +230,10 @@ public final class ServerConfig {
                 case "--routing" -> builder.routingMode(RoutingMode.valueOf(requireValue(args, ++i, arg)));
                 case "--shutdown-drain-sec" ->
                     builder.shutdownDrainSec(Integer.parseInt(requireValue(args, ++i, arg)));
+                case "--metadata-archive" ->
+                    builder.metadataArchiveEnabled(Boolean.parseBoolean(requireValue(args, ++i, arg)));
+                case "--restore-from-storage" ->
+                    builder.restoreFromStorage(Boolean.parseBoolean(requireValue(args, ++i, arg)));
                 case "--wal-cache-size" -> builder.streamConfig().walCacheSize(Long.parseLong(requireValue(args, ++i, arg)));
                 case "--block-cache-size" ->
                     builder.streamConfig().blockCacheSize(Long.parseLong(requireValue(args, ++i, arg)));
@@ -262,6 +278,8 @@ public final class ServerConfig {
         private int sseMaxDurationSec = 55;
         private int maxChunkSize = 64 * 1024;
         private int shutdownDrainSec = 0;
+        private boolean metadataArchiveEnabled = true;
+        private boolean restoreFromStorage = false;
         private final StreamConfig.Builder streamConfig = StreamConfig.builder();
         private final Map<String, String> envs = new LinkedHashMap<>();
         public Builder nodeId(int nodeId) {
@@ -363,6 +381,16 @@ public final class ServerConfig {
             return this;
         }
 
+        public Builder metadataArchiveEnabled(boolean metadataArchiveEnabled) {
+            this.metadataArchiveEnabled = metadataArchiveEnabled;
+            return this;
+        }
+
+        public Builder restoreFromStorage(boolean restoreFromStorage) {
+            this.restoreFromStorage = restoreFromStorage;
+            return this;
+        }
+
         public StreamConfig.Builder streamConfig() {
             return streamConfig;
         }
@@ -443,6 +471,7 @@ public final class ServerConfig {
                     case "sseMaxDurationSec" -> sseMaxDurationSec(toInt(value));
                     case "maxChunkSize" -> maxChunkSize(toInt(value));
                     case "shutdownDrainSec" -> shutdownDrainSec(toInt(value));
+                    case "metadataArchive" -> metadataArchiveEnabled(toBoolean(value));
                     case "clusterId" -> clusterId(String.valueOf(value));
                     default -> throw new IllegalArgumentException("unknown topology config key: " + key);
                 }
@@ -457,6 +486,14 @@ public final class ServerConfig {
             }
 
             return Integer.parseInt(String.valueOf(value));
+        }
+
+        private static boolean toBoolean(Object value) {
+            if (value instanceof Boolean bool) {
+                return bool;
+            }
+
+            return Boolean.parseBoolean(String.valueOf(value));
         }
 
         public ServerConfig build() {

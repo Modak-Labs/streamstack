@@ -49,6 +49,8 @@ public final class MetadataNode implements AutoCloseable {
     private final MetadataLifecycle lifecycle;
     private final MetadataHealth health;
     private final ScheduledExecutorService registrar;
+    private final SnapshotArchive snapshotArchive;
+    private final boolean restoredFromArchive;
 
     private final AtomicBoolean registered = new AtomicBoolean(false);
 
@@ -98,6 +100,21 @@ public final class MetadataNode implements AutoCloseable {
         ObjectStorage objectStorage,
         Options options,
         String httpAddress) throws IOException {
+        this(nodeId, host, port, dataDir, peers, nodeEpoch, objectStorage, options, httpAddress, null, false);
+    }
+
+    public MetadataNode(
+        int nodeId,
+        String host,
+        int port,
+        File dataDir,
+        List<String> peers,
+        long nodeEpoch,
+        ObjectStorage objectStorage,
+        Options options,
+        String httpAddress,
+        SnapshotArchive snapshotArchive,
+        boolean restoreFromArchive) throws IOException {
         this.nodeId = nodeId;
         this.nodeEpoch = nodeEpoch;
         this.httpAddress = Objects.isNull(httpAddress) ? "" : httpAddress;
@@ -111,6 +128,9 @@ public final class MetadataNode implements AutoCloseable {
         Files.createDirectories(logDir.toPath());
         Files.createDirectories(metaDir.toPath());
         Files.createDirectories(snapshotDir.toPath());
+        this.snapshotArchive = snapshotArchive;
+        this.restoredFromArchive = restoreFromArchive && restore(logDir, snapshotDir);
+        this.stateMachine.setSnapshotArchive(snapshotArchive);
         NodeOptions nodeOptions = new NodeOptions();
 
         nodeOptions.setElectionTimeoutMs(options.electionTimeoutMs());
@@ -163,6 +183,37 @@ public final class MetadataNode implements AutoCloseable {
         this.registrar.scheduleWithFixedDelay(this::tryRegister, 100, 500, TimeUnit.MILLISECONDS);
     }
 
+    private boolean restore(File logDir, File snapshotDir) throws IOException {
+        if (Objects.isNull(snapshotArchive)) {
+            throw new IllegalStateException("restore from storage requested but no snapshot archive configured");
+        }
+
+        if (!isEmptyDir(snapshotDir)) {
+            LOGGER.info("local raft snapshot exists, skipping restore from storage nodeId={}", nodeId);
+            return false;
+        }
+
+        if (!isEmptyDir(logDir)) {
+            throw new IllegalStateException(
+                "raft log exists without a local snapshot; wipe the metadata data dir before restoring from storage");
+        }
+
+        SnapshotArchive.ArchivedSnapshot latest = snapshotArchive.latest().orElseThrow(() ->
+            new IllegalStateException("restore from storage requested but no archived metadata snapshot found"));
+
+        stateMachine.restore(snapshotArchive.read(latest));
+        LOGGER.info("restored metadata from archived snapshot nodeId={} key={} appliedIndex={}",
+            nodeId, latest.key(), latest.appliedIndex());
+
+        return true;
+    }
+
+    private static boolean isEmptyDir(File dir) throws IOException {
+        try (var entries = Files.list(dir.toPath())) {
+            return entries.findAny().isEmpty();
+        }
+    }
+
     private void tryRegister() {
         if (registered.get()) {
             registrar.shutdown();
@@ -209,6 +260,14 @@ public final class MetadataNode implements AutoCloseable {
 
     public MetadataStateMachine stateMachine() {
         return stateMachine;
+    }
+
+    public SnapshotArchive snapshotArchive() {
+        return snapshotArchive;
+    }
+
+    public boolean restoredFromArchive() {
+        return restoredFromArchive;
     }
 
     public MetadataClient client() {

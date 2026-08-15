@@ -16,6 +16,8 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       TOPO: /opt/streamstack/topo/topo.yaml
       NODE_ID: "1"
+      METADATA_ARCHIVE: ${METADATA_ARCHIVE:-}
+      RESTORE_FROM_STORAGE: ${RESTORE_FROM_STORAGE:-}
     volumes:
       - .:/opt/streamstack/topo:ro
       - node1-data:/tmp/streamstack

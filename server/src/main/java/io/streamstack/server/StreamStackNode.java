@@ -2,7 +2,9 @@ package io.streamstack.server;
 
 import io.streamstack.Version;
 import io.streamstack.metadata.raft.MetadataNode;
+import io.streamstack.metadata.raft.ObjectStorageSnapshotArchive;
 import io.streamstack.metadata.raft.RaftKVClient;
+import io.streamstack.metadata.raft.SnapshotArchive;
 import io.streamstack.metadata.raft.RaftObjectManager;
 import io.streamstack.metadata.raft.RaftStreamManager;
 import io.streamstack.s3.ByteBufAlloc;
@@ -48,6 +50,7 @@ public final class StreamStackNode implements AutoCloseable {
     private static final long STORAGE_READINESS_MAX_BACKOFF_MS = 30_000;
 
     private final ServerConfig config;
+    private final SnapshotArchive snapshotArchive;
     private final MetadataNode metadataNode;
     private final ObjectStorage objectStorage;
     private final ObjectStorage walObjectStorage;
@@ -78,6 +81,9 @@ public final class StreamStackNode implements AutoCloseable {
             .builder(storageBucket)
             .threadPrefix("data")
             .build();
+        this.snapshotArchive = config.metadataArchiveEnabled() || config.restoreFromStorage()
+            ? new ObjectStorageSnapshotArchive(objectStorage, metadataArchivePrefix(config))
+            : null;
         this.metadataNode = new MetadataNode(
             config.nodeId(),
             config.raftHost(),
@@ -87,7 +93,9 @@ public final class StreamStackNode implements AutoCloseable {
             config.nodeEpoch(),
             objectStorage,
             MetadataNode.Options.defaults(),
-            config.httpAddress());
+            config.httpAddress(),
+            snapshotArchive,
+            config.restoreFromStorage());
         RaftStreamManager streamManager = new RaftStreamManager(metadataNode);
         RaftObjectManager objectManager = new RaftObjectManager(metadataNode);
         Config streamConfig = new Config();
@@ -188,6 +196,12 @@ public final class StreamStackNode implements AutoCloseable {
         awaitObjectStorageReady();
         metadataNode.awaitLeader(30, TimeUnit.SECONDS);
         metadataNode.awaitRegistered(30, TimeUnit.SECONDS);
+
+        if (metadataNode.restoredFromArchive()) {
+            metadataNode.triggerSnapshot();
+            LOGGER.info("persisted restored metadata into local raft snapshot nodeId={}", config.nodeId());
+        }
+
         storage.startup();
         compactionManager.start();
         ready.set(true);
@@ -253,6 +267,14 @@ public final class StreamStackNode implements AutoCloseable {
 
     public S3StreamService streamService() {
         return streamService;
+    }
+
+    public SnapshotArchive snapshotArchive() {
+        return snapshotArchive;
+    }
+
+    private static String metadataArchivePrefix(ServerConfig config) {
+        return "_streamstack/metadata/" + config.clusterId() + "/snapshots/";
     }
 
     public boolean isReady() {
@@ -324,6 +346,10 @@ public final class StreamStackNode implements AutoCloseable {
         }
 
         metadataNode.close();
+
+        if (Objects.nonNull(snapshotArchive)) {
+            snapshotArchive.close();
+        }
 
         if (Objects.nonNull(adminServer)) {
             adminServer.close();

@@ -9,6 +9,7 @@ import io.javalin.http.Context;
 import io.javalin.http.staticfiles.Location;
 import io.streamstack.metadata.raft.MetadataHealth;
 import io.streamstack.metadata.raft.MetadataNode;
+import io.streamstack.metadata.raft.SnapshotArchive;
 import io.streamstack.server.model.Owner;
 import io.streamstack.server.model.StreamMeta;
 import io.streamstack.server.model.config.ServerConfig;
@@ -62,6 +63,8 @@ public final class AdminServer implements AutoCloseable {
         app.post("/admin/peers", this::addPeer);
         app.delete("/admin/peers/{peer}", this::removePeer);
         app.post("/admin/transfer-leader", this::transferLeader);
+        app.post("/admin/snapshot", this::triggerSnapshot);
+        app.get("/admin/snapshots", this::snapshots);
 
         app.exception(Exception.class, (e, ctx) -> {
             LOGGER.warn("admin request failed: {} {}", ctx.method(), ctx.path(), e);
@@ -215,6 +218,40 @@ public final class AdminServer implements AutoCloseable {
         }
 
         json(ctx, 200, Map.of("transferredTo", peer.toString()));
+    }
+
+    private void triggerSnapshot(Context ctx) throws Exception {
+        node.metadataNode().triggerSnapshot();
+        json(ctx, 200, Map.of("appliedIndex", node.metadataNode().stateMachine().appliedIndex()));
+    }
+
+    private void snapshots(Context ctx) {
+        SnapshotArchive archive = node.snapshotArchive();
+
+        if (Objects.isNull(archive)) {
+            error(ctx, 404, "metadata snapshot archive disabled");
+            return;
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>();
+
+        for (SnapshotArchive.ArchivedSnapshot snapshot : archive.list()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+
+            item.put("key", snapshot.key());
+            item.put("appliedIndex", snapshot.appliedIndex());
+            item.put("timestampMs", snapshot.timestampMs());
+            item.put("size", snapshot.size());
+            items.add(item);
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+
+        body.put("archiveSuccessCount", archive.successCount());
+        body.put("archiveFailureCount", archive.failureCount());
+        body.put("lastArchivedIndex", archive.lastArchivedIndex());
+        body.put("snapshots", items);
+        json(ctx, 200, body);
     }
 
     private PeerId requirePeer(Context ctx) throws Exception {

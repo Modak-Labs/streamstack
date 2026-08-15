@@ -3,9 +3,11 @@ import {
   fetchCluster,
   fetchNodes,
   fetchReady,
+  fetchSnapshots,
   type ClusterInfo,
   type NodeInfo,
   type Readiness,
+  type SnapshotArchiveInfo,
 } from './api'
 
 const POLL_INTERVAL_MS = 2000
@@ -44,6 +46,7 @@ export function App() {
   const [cluster, setCluster] = useState<ClusterInfo | null>(null)
   const [nodes, setNodes] = useState<NodeInfo[]>([])
   const [ready, setReady] = useState<Readiness | null>(null)
+  const [snapshots, setSnapshots] = useState<SnapshotArchiveInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
 
@@ -52,7 +55,12 @@ export function App() {
 
     async function poll() {
       try {
-        const [c, n, r] = await Promise.all([fetchCluster(), fetchNodes(), fetchReady()])
+        const [c, n, r, s] = await Promise.all([
+          fetchCluster(),
+          fetchNodes(),
+          fetchReady(),
+          fetchSnapshots(),
+        ])
 
         if (!alive) {
           return
@@ -61,6 +69,7 @@ export function App() {
         setCluster(c)
         setNodes(n.nodes)
         setReady(r)
+        setSnapshots(s)
         setError(null)
         setUpdatedAt(new Date())
       } catch (e) {
@@ -183,6 +192,37 @@ export function App() {
             </tbody>
           </table>
         )}
+      </section>
+
+      <section class="ss-section">
+        <h2>Metadata snapshots</h2>
+        {!snapshots ? (
+          <div class="ss-empty">Snapshot archive disabled</div>
+        ) : snapshots.snapshots.length === 0 ? (
+          <div class="ss-empty">No archived snapshots yet</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Applied index</th>
+                <th>Archived at</th>
+                <th>Size</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...snapshots.snapshots].reverse().map((s) => (
+                <tr key={s.key}>
+                  <td class="mono">{s.appliedIndex}</td>
+                  <td class="mono">{new Date(s.timestampMs).toLocaleString()}</td>
+                  <td class="mono">{s.size}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {snapshots && snapshots.archiveFailureCount > 0 ? (
+          <div class="ss-empty">Archive failures: {snapshots.archiveFailureCount}</div>
+        ) : null}
       </section>
 
       <footer class="ss-footer">

@@ -31,6 +31,20 @@ export interface Readiness {
   registered: boolean
 }
 
+export interface ArchivedSnapshot {
+  key: string
+  appliedIndex: number
+  timestampMs: number
+  size: number
+}
+
+export interface SnapshotArchiveInfo {
+  archiveSuccessCount: number
+  archiveFailureCount: number
+  lastArchivedIndex: number
+  snapshots: ArchivedSnapshot[]
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { Accept: 'application/json' } })
   const body = (await res.json()) as T
@@ -45,3 +59,17 @@ async function get<T>(path: string): Promise<T> {
 export const fetchCluster = () => get<ClusterInfo>('/admin/cluster')
 export const fetchNodes = () => get<{ nodes: NodeInfo[] }>('/admin/nodes')
 export const fetchReady = () => get<Readiness>('/ready')
+
+export async function fetchSnapshots(): Promise<SnapshotArchiveInfo | null> {
+  const res = await fetch('/admin/snapshots', { headers: { Accept: 'application/json' } })
+
+  if (res.status === 404) {
+    return null
+  }
+
+  if (!res.ok) {
+    throw new Error(`GET /admin/snapshots failed: ${res.status}`)
+  }
+
+  return (await res.json()) as SnapshotArchiveInfo
+}

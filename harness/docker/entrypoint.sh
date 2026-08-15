@@ -20,6 +20,12 @@ fi
 if [ -n "${ROUTING:-}" ]; then
   set -- "$@" --routing "$ROUTING"
 fi
+if [ -n "${METADATA_ARCHIVE:-}" ]; then
+  set -- "$@" --metadata-archive "$METADATA_ARCHIVE"
+fi
+if [ -n "${RESTORE_FROM_STORAGE:-}" ]; then
+  set -- "$@" --restore-from-storage "$RESTORE_FROM_STORAGE"
+fi
 
 bucket="${DATA_BUCKET:-${BUCKET_NAME:-}}"
 if [ -n "$bucket" ]; then

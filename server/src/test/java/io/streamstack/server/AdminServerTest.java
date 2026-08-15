@@ -99,6 +99,23 @@ public class AdminServerTest {
             assertEquals("text/plain", streamBody.get("meta").get("contentType").asText());
             assertFalse(streamBody.get("meta").get("closed").asBoolean());
 
+            HttpResponse<String> snapshotsBefore = get(client, adminPort, "/admin/snapshots");
+            JsonNode snapshotsBeforeBody = MAPPER.readTree(snapshotsBefore.body());
+
+            assertEquals(200, snapshotsBefore.statusCode());
+            assertEquals(0, snapshotsBeforeBody.get("snapshots").size());
+
+            HttpResponse<String> snapshot = client.send(
+                HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + adminPort + "/admin/snapshot"))
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, snapshot.statusCode());
+            assertTrue(MAPPER.readTree(snapshot.body()).get("appliedIndex").asLong() > 0);
+            awaitArchivedSnapshot(client, adminPort);
+
             node.markNotReady();
 
             HttpResponse<String> notReady = get(client, adminPort, "/ready");
@@ -106,6 +123,25 @@ public class AdminServerTest {
             assertEquals(503, notReady.statusCode());
             assertFalse(MAPPER.readTree(notReady.body()).get("ready").asBoolean());
         }
+    }
+
+    private static void awaitArchivedSnapshot(HttpClient client, int adminPort) throws Exception {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
+
+        while (System.nanoTime() < deadline) {
+            JsonNode body = MAPPER.readTree(get(client, adminPort, "/admin/snapshots").body());
+
+            if (body.get("snapshots").size() > 0) {
+                assertTrue(body.get("archiveSuccessCount").asLong() > 0);
+                assertTrue(body.get("snapshots").get(0).get("appliedIndex").asLong() > 0);
+                assertTrue(body.get("snapshots").get(0).get("size").asLong() > 0);
+                return;
+            }
+
+            Thread.sleep(50);
+        }
+
+        throw new AssertionError("no archived snapshot appeared within timeout");
     }
 
     @Test

@@ -17,6 +17,8 @@ docker compose --env-file harness/local/.env \
 
 Swap `docker-compose.ds.yml` for `docker-compose.s2.yml` to run S2 instead. Node listens on `127.0.0.1:4437`. Admin plane and dashboard: http://127.0.0.1:9090 (`/health`, `/ready`, `/admin/*`).
 
+The raft leader archives metadata snapshots to the storage bucket under `_streamstack/metadata/{clusterId}/snapshots/` (disable with `METADATA_ARCHIVE=false`). Recover a wiped node from the archive with `RESTORE_FROM_STORAGE=true` on a fresh data dir — see the deployment docs for the runbooks.
+
 [BENCH.md](BENCH.md) has DS and S2 smoke/load tests.
 MinIO console: http://127.0.0.1:9001 (`minioadmin` / `minioadmin`).
 
