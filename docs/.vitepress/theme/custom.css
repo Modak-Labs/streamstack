@@ -234,14 +234,12 @@
 }
 
 .VPDoc h1 {
-  font-size: clamp(2.25rem, 5vw, 3.5rem);
-  line-height: 1.05;
+  font-size: clamp(1.7rem, 3vw, 2.05rem);
+  line-height: 1.15;
 }
 
-.vp-doc h2:first-of-type {
-  margin-top: 1.25rem;
-  padding-top: 0;
-  border-top: none;
+.vp-doc h2 {
+  margin-top: 2rem;
 }
 
 .vp-doc div[class*="language-"] {

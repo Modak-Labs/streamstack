@@ -48,6 +48,7 @@ public final class StreamStackNode implements AutoCloseable {
     private static final int STORAGE_READINESS_MAX_ATTEMPTS = 10;
     private static final long STORAGE_READINESS_INITIAL_BACKOFF_MS = 1_000;
     private static final long STORAGE_READINESS_MAX_BACKOFF_MS = 30_000;
+    private static final long FINAL_SNAPSHOT_ARCHIVE_TIMEOUT_MS = 15_000;
 
     private final ServerConfig config;
     private final SnapshotArchive snapshotArchive;
@@ -305,7 +306,19 @@ public final class StreamStackNode implements AutoCloseable {
     @Override
     public void close() {
         ready.set(false);
+        closeStreamingLayer();
+        archiveFinalSnapshot();
+        closeObjectStorages();
+        closeMetadata();
 
+        if (Objects.nonNull(adminServer)) {
+            adminServer.close();
+        }
+
+        started.set(false);
+    }
+
+    private void closeStreamingLayer() {
         try {
             for (var stream : new ArrayList<>(streamService.openStreamSnapshot())) {
                 try {
@@ -332,7 +345,17 @@ public final class StreamStackNode implements AutoCloseable {
             storage.shutdown();
         } catch (Exception ignored) {
         }
+    }
 
+    private void archiveFinalSnapshot() {
+        try {
+            metadataNode.archiveFinalSnapshot(FINAL_SNAPSHOT_ARCHIVE_TIMEOUT_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void closeObjectStorages() {
         if (Objects.nonNull(walObjectStorage)) {
             try {
                 walObjectStorage.close();
@@ -344,18 +367,14 @@ public final class StreamStackNode implements AutoCloseable {
             objectStorage.close();
         } catch (Exception ignored) {
         }
+    }
 
+    private void closeMetadata() {
         metadataNode.close();
 
         if (Objects.nonNull(snapshotArchive)) {
             snapshotArchive.close();
         }
-
-        if (Objects.nonNull(adminServer)) {
-            adminServer.close();
-        }
-
-        started.set(false);
     }
 
     private record WalBundle(WriteAheadLog wal, ObjectStorage objectStorage) {

@@ -11,6 +11,7 @@
     "vitepress": "^1.6.4"
   },
   "dependencies": {
-    "@paper-design/shaders": "0.0.80"
+    "@paper-design/shaders": "0.0.80",
+    "vitepress-openapi": "^0.2.4"
   }
 }
