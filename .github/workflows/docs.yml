@@ -23,15 +23,17 @@ jobs:
     env:
       BASE_PATH: /${{ github.event.repository.name }}/
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: docs/package-lock.json
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: true
 
       - name: Install docs dependencies
         working-directory: docs
