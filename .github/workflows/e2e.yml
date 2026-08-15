@@ -54,6 +54,28 @@ jobs:
           java -jar cli/target/streamstack.jar ds bench --endpoint http://127.0.0.1:4437 \
             -b 1024 -n 64 -w 8 -d 8
 
+      - name: Archive metadata snapshot
+        run: |
+          curl -sf -X PUT -H 'Content-Type: application/json' -d '' http://127.0.0.1:4437/e2e/restore
+          curl -sf -X POST -H 'Content-Type: application/json' -d '{"payload":"restore-me"}' http://127.0.0.1:4437/e2e/restore
+          curl -sf -X POST http://127.0.0.1:9090/admin/snapshot | jq -e '.appliedIndex > 0'
+          timeout 60 bash -c "until curl -sf http://127.0.0.1:9090/admin/snapshots | jq -e '.snapshots | length > 0' > /dev/null; do sleep 2; done"
+
+      - name: Restore from storage after data dir loss
+        run: |
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.ds.yml \
+            rm -sf node1
+          docker volume rm local_node1-data
+          RESTORE_FROM_STORAGE=true docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.ds.yml \
+            up -d node1
+          timeout 180 bash -c 'until curl -sf http://127.0.0.1:9090/ready; do sleep 2; done'
+          curl -sf http://127.0.0.1:9090/admin/streams/e2e/restore | jq -e '.ownerLocal == true and .streamId != null'
+          curl -sf -m 30 http://127.0.0.1:4437/e2e/restore | grep -q '"payload":"restore-me"'
+
       - name: Collect logs
         if: always()
         run: |
@@ -169,6 +191,27 @@ jobs:
           curl -sf -X PUT -H 'Content-Type: application/json' -d '' "http://127.0.0.1:${http_port}/e2e/failover"
           curl -sf -X POST -H 'Content-Type: application/json' -d '{"after":"failover"}' "http://127.0.0.1:${http_port}/e2e/failover"
           curl -sf -m 30 "http://127.0.0.1:${http_port}/e2e/failover" | grep -q '"after":"failover"'
+          echo "$leader" > killed-leader.txt
+
+      - name: Replace node with empty data dir
+        run: |
+          node=$(cat killed-leader.txt)
+          admin_port=$((9090 + node))
+          echo "replacing node ${node} with a fresh data volume"
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.cluster.ds.yml \
+            rm -sf "node${node}"
+          docker volume rm "local_node${node}-data"
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.cluster.ds.yml \
+            up -d "node${node}"
+          timeout 180 bash -c "until curl -sf http://127.0.0.1:${admin_port}/ready; do sleep 2; done"
+          curl -sf "http://127.0.0.1:${admin_port}/admin/cluster" | jq -e '.registered == true and .raft.appliedIndex > 0'
+          curl -sf "http://127.0.0.1:${admin_port}/admin/nodes" | jq -e '.nodes | length == 3'
+          http_port=$((4436 + node))
+          curl -sfL -m 30 "http://127.0.0.1:${http_port}/e2e/failover" | grep -q '"after":"failover"'
 
       - name: Collect logs
         if: always()

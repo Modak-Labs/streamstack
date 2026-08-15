@@ -68,6 +68,8 @@ public final class MetadataStateMachine extends StateMachineAdapter {
 
     private volatile MetadataLifecycle lifecycle;
 
+    private volatile SnapshotArchive snapshotArchive;
+
     public MetadataStateMachine() {
         this.streamControlManager = new StreamControlManager();
         this.objectControlManager = new S3ObjectControlManager(streamControlManager);
@@ -76,6 +78,10 @@ public final class MetadataStateMachine extends StateMachineAdapter {
 
     public void setLifecycle(MetadataLifecycle lifecycle) {
         this.lifecycle = lifecycle;
+    }
+
+    public void setSnapshotArchive(SnapshotArchive snapshotArchive) {
+        this.snapshotArchive = snapshotArchive;
     }
 
     public StreamControlManager streamControlManager() {
@@ -342,11 +348,13 @@ public final class MetadataStateMachine extends StateMachineAdapter {
     public void onSnapshotSave(SnapshotWriter writer, Closure done) {
         try {
             byte[] bytes;
+            long snapshotIndex;
 
             stateLock.readLock().lock();
 
             try {
                 bytes = MetadataSnapshotCodec.encode(streamControlManager, objectControlManager, kvControlManager);
+                snapshotIndex = appliedIndex.get();
             } finally {
                 stateLock.readLock().unlock();
             }
@@ -361,10 +369,38 @@ public final class MetadataStateMachine extends StateMachineAdapter {
             }
 
             done.run(Status.OK());
+            SnapshotArchive archive = snapshotArchive;
+
+            if (Objects.nonNull(archive) && isLeader()) {
+                archive.submit(snapshotIndex, bytes);
+            }
         } catch (IOException e) {
             LOGGER.error("failed to save metadata snapshot", e);
             done.run(new Status(RaftError.EIO, e.getMessage()));
         }
+    }
+
+    public void restore(byte[] bytes) {
+        Objects.requireNonNull(bytes, "bytes");
+        stateLock.writeLock().lock();
+
+        try {
+            if (!isEmptyState()) {
+                throw new IllegalStateException("cannot restore metadata snapshot into non-empty state");
+            }
+
+            MetadataSnapshotCodec.decode(bytes, streamControlManager, objectControlManager, kvControlManager);
+        } finally {
+            stateLock.writeLock().unlock();
+        }
+    }
+
+    private boolean isEmptyState() {
+        return streamControlManager.nextAssignedStreamId() == 0
+            && streamControlManager.streamsMetadata().isEmpty()
+            && streamControlManager.nodeEpochs().isEmpty()
+            && objectControlManager.nextAssignedObjectId() == 0
+            && kvControlManager.entries().isEmpty();
     }
 
     @Override
