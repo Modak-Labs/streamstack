@@ -42,3 +42,7 @@ server/conformance-run.log
 /docs/node_modules/
 /docs/.vitepress/cache/
 /docs/.vitepress/dist/
+
+### Dashboard ###
+/dashboard/node_modules/
+/server/src/main/resources/admin/dist/

@@ -120,6 +120,8 @@ public final class S2Server implements AutoCloseable {
 
     @Override
     public void close() {
+        node.drainBeforeShutdown();
+
         try {
             app.stop();
         } catch (Exception ignored) {

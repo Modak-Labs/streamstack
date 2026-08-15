@@ -32,6 +32,7 @@ public class StreamStackServerIntegrationTest {
             .nodeEpoch(1)
             .httpHost("127.0.0.1")
             .httpPort(httpPort)
+            .adminPort(0)
             .raftHost("127.0.0.1")
             .raftPort(raftPort)
             .raftPeers(List.of("127.0.0.1:" + raftPort))

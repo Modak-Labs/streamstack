@@ -15,7 +15,7 @@ docker compose --env-file harness/local/.env \
   up -d --build
 ```
 
-Swap `docker-compose.ds.yml` for `docker-compose.s2.yml` to run S2 instead. Node listens on `127.0.0.1:4437`.
+Swap `docker-compose.ds.yml` for `docker-compose.s2.yml` to run S2 instead. Node listens on `127.0.0.1:4437`. Admin plane and dashboard: http://127.0.0.1:9090 (`/health`, `/ready`, `/admin/*`).
 
 [BENCH.md](BENCH.md) has DS and S2 smoke/load tests.
 MinIO console: http://127.0.0.1:9001 (`minioadmin` / `minioadmin`).
@@ -67,7 +67,7 @@ java -jar frontend/ds/server/target/ds-server.jar \
 
 ## Multi-node (local)
 
-`docker-compose.cluster.ds.yml` starts three DS processes against `local/topo.cluster.yaml`. Each service is a fixed `NODE_ID` (1 / 2 / 3). Host network so they bind 4437–4439 / 8091–8093 as in the topo.
+`docker-compose.cluster.ds.yml` starts three DS processes against `local/topo.cluster.yaml`. Each service is a fixed `NODE_ID` (1 / 2 / 3). Host network so they bind 4437–4439 / 8091–8093 / admin 9091–9093 as in the topo.
 
 ```bash
 docker compose --env-file harness/local/.env \
