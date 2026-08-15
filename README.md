@@ -11,7 +11,7 @@ A durable stream engine on object storage, with storage, metadata, and protocol 
 
 ## Installation
 
-Java 17+ and Maven.
+Java 17+ and Maven. Docker (Optional)
 
 ```bash
 mvn clean package
@@ -29,7 +29,7 @@ docker compose --env-file harness/local/.env \
 
 Node listens on `127.0.0.1:4437`. MinIO, cluster, AWS, and Fly: [harness/README.md](harness/README.md).
 
-## Deployment
+## Deployment (AWS)
 
 Create data and WAL S3 buckets. Copy `harness/aws/.env.example` to `harness/aws/.env` and fill `AWS_*`, `DATA_BUCKET`, and `WAL_BUCKET`.
 
@@ -49,18 +49,6 @@ docker compose --env-file harness/local/.env \
   -f harness/local/docker-compose.cluster.ds.yml \
   up -d --build
 ```
-
-## Documentation
-
-The documentation source is in [`docs/pages`](docs/pages).
-
-```bash
-cd docs
-npm install
-npm run dev
-```
-
-Open http://localhost:5173.
 
 ## License
 
