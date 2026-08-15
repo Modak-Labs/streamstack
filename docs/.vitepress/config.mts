@@ -26,7 +26,7 @@ export default defineConfig({
     [
       'script',
       {},
-      `(function(){function m(h,a){var n=parseInt(h.slice(1),16),r=n>>16,g=n>>8&255,b=n&255;return'#'+[r,g,b].map(function(c){c=Math.round(c+(255-c)*a);return c.toString(16).padStart(2,'0')}).join('')}try{var h=localStorage.getItem('ss-accent-hex-v2');if(h&&/^#[0-9a-fA-F]{6}$/.test(h)){var s=document.documentElement.style;var n=parseInt(h.slice(1),16);s.setProperty('--vp-c-brand-1',h);s.setProperty('--vp-c-brand-2',m(h,.18));s.setProperty('--vp-c-brand-3',m(h,.36));s.setProperty('--vp-c-brand-soft','rgb('+(n>>16)+' '+(n>>8&255)+' '+(n&255)+' / 0.14)')}}catch(e){}})();`,
+      `(function(){function m(h,a){var n=parseInt(h.slice(1),16),r=n>>16,g=n>>8&255,b=n&255;return'#'+[r,g,b].map(function(c){c=Math.round(c+(255-c)*a);return c.toString(16).padStart(2,'0')}).join('')}try{var h=localStorage.getItem('ss-accent-hex-v2');if(h&&/^#[0-9a-fA-F]{6}$/.test(h)){var d=document.documentElement,s=d.style;var n=parseInt(h.slice(1),16);d.dataset.ssAccent=h.toLowerCase()==='#ffffff'?'white':'color';s.setProperty('--vp-c-brand-1',h);s.setProperty('--vp-c-brand-2',m(h,.18));s.setProperty('--vp-c-brand-3',m(h,.36));s.setProperty('--vp-c-brand-soft','rgb('+(n>>16)+' '+(n>>8&255)+' '+(n&255)+' / 0.14)')}}catch(e){}})();`,
     ],
   ],
   themeConfig: {

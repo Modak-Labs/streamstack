@@ -57,6 +57,8 @@ export function applyAccentHex(hex: string) {
   root.setProperty('--vp-c-brand-2', mixWhite(value, 0.18));
   root.setProperty('--vp-c-brand-3', mixWhite(value, 0.36));
   root.setProperty('--vp-c-brand-soft', `rgb(${r} ${g} ${b} / 0.14)`);
+  document.documentElement.dataset.ssAccent =
+    value.toLowerCase() === DEFAULT_ACCENT ? 'white' : 'color';
 
   try {
     localStorage.setItem(KEY, value);

@@ -24,6 +24,8 @@
   --vp-code-block-divider-color: #2b2b2f;
   --vp-code-copy-code-bg: #19191c;
   --vp-code-copy-code-hover-bg: #0c0c0d;
+  --ss-inline-code-bg: rgb(255 255 255 / 0.08);
+  --ss-inline-code-border: rgb(255 255 255 / 0.12);
   --vp-home-hero-name-color: #f5f5f3;
   --vp-home-hero-name-background: none;
   --ss-content-max: 1180px;
@@ -31,6 +33,11 @@
   --ss-radius: 2px;
   --vp-sidebar-width: 320px;
   --ss-outline-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M8 6.5h12M8 12h12M8 17.5h12' stroke='black' stroke-width='1.7' stroke-linecap='round'/%3E%3Cpath d='M4 6.5h.01M4 12h.01M4 17.5h.01' stroke='black' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+:root[data-ss-accent="color"] {
+  --ss-inline-code-bg: var(--vp-code-bg);
+  --ss-inline-code-border: transparent;
 }
 
 @media (min-width: 640px) {
@@ -52,7 +59,7 @@
   margin-inline: auto;
 }
 
-.VPNav {
+.VPNavBar {
   backdrop-filter: blur(14px);
 }
 
@@ -63,17 +70,21 @@
   background-color: var(--vp-nav-bg-color) !important;
 }
 
-.VPNavBar .wrapper {
+.VPNavBar.home .divider-line {
+  background-color: var(--vp-c-gutter) !important;
+}
+
+.VPNavBar:not(.has-sidebar) .wrapper {
   padding-left: var(--ss-content-pad) !important;
   padding-right: var(--ss-content-pad) !important;
 }
 
-.VPNavBar .container {
+.VPNavBar:not(.has-sidebar) .container {
   max-width: var(--ss-content-max) !important;
   width: 100%;
 }
 
-.VPNavBar .title {
+.VPNavBar:not(.has-sidebar) .container > .title {
   width: auto !important;
 }
 
@@ -85,11 +96,20 @@
 }
 
 @media (min-width: 960px) {
-  .VPNavBar.has-sidebar .title {
+  .VPNavBar.has-sidebar .wrapper {
+    padding-right: 32px !important;
+    padding-left: 32px !important;
+  }
+
+  .VPNavBar.has-sidebar .container {
+    max-width: none !important;
+  }
+
+  .VPNavBar.has-sidebar .container > .title {
     position: static !important;
-    width: auto !important;
-    padding: 0 !important;
+    width: 32px !important;
     height: calc(var(--vp-nav-height) - 1px) !important;
+    padding: 0 !important;
   }
 
   .VPNavBar.has-sidebar .content {
@@ -97,12 +117,29 @@
     padding-right: 0 !important;
   }
 
-  .VPNavBar.has-sidebar .divider {
-    padding-left: 0 !important;
+  .VPNavBar.has-sidebar .VPNavBarTitle > .title {
+    width: 32px !important;
   }
 
   .VPNavBarTitle.has-sidebar .title {
     border-bottom-color: transparent !important;
+  }
+
+  .VPNavBar.has-sidebar .divider {
+    padding-left: 0 !important;
+  }
+}
+
+@media (min-width: 1440px) {
+  .VPNavBar.has-sidebar .wrapper {
+    padding-right: max(
+      32px,
+      calc((100vw - (var(--vp-layout-max-width) - 64px)) / 2)
+    ) !important;
+    padding-left: max(
+      32px,
+      calc((100vw - (var(--vp-layout-max-width) - 64px)) / 2)
+    ) !important;
   }
 }
 
@@ -236,6 +273,11 @@
   border-radius: var(--ss-radius) !important;
 }
 
+.vp-doc :not(pre) > code {
+  border: 1px solid var(--ss-inline-code-border);
+  background: var(--ss-inline-code-bg);
+}
+
 .DocSearch-Button .DocSearch-Button-Key {
   border-radius: var(--ss-radius) 0 0 var(--ss-radius) !important;
 }
@@ -263,6 +305,10 @@
   font-size: 0.8rem;
   font-weight: 500;
   color: var(--vp-c-text-2);
+}
+
+.ss-doc-copyright {
+  margin-top: 1.5rem;
 }
 
 .VPDocFooter .ss-side-ico {
@@ -428,3 +474,49 @@
   width: 20px;
   height: 20px;
 }
+
+@media (max-width: 767px) {
+  .VPNavBarHamburger .container {
+    width: 20px !important;
+    height: 16px !important;
+    overflow: visible !important;
+  }
+
+  .VPNavBarHamburger .top,
+  .VPNavBarHamburger .middle,
+  .VPNavBarHamburger .bottom {
+    left: 0 !important;
+    width: 20px !important;
+    height: 2px !important;
+    transform: none !important;
+    transform-origin: center !important;
+  }
+
+  .VPNavBarHamburger .top {
+    top: 1px !important;
+  }
+
+  .VPNavBarHamburger .middle {
+    top: 7px !important;
+  }
+
+  .VPNavBarHamburger .bottom {
+    top: 13px !important;
+  }
+
+  .VPNavBarHamburger.active .top {
+    top: 7px !important;
+    transform: rotate(45deg) !important;
+  }
+
+  .VPNavBarHamburger.active .middle {
+    top: 7px !important;
+    opacity: 0;
+  }
+
+  .VPNavBarHamburger.active .bottom {
+    top: 7px !important;
+    transform: rotate(-45deg) !important;
+  }
+}
+
