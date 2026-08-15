@@ -3,9 +3,7 @@ x-env: &env
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
   AWS_REGION: ${AWS_REGION:-us-east-1}
-  TOPO: /opt/streamstack/harness/configs/topo.cluster.yaml
-  DATA_BUCKET: ${DATA_BUCKET:-}
-  WAL_BUCKET: ${WAL_BUCKET:-}
+  TOPO: /opt/streamstack/topo/topo.cluster.yaml
 
 x-node: &node
   build:
@@ -15,7 +13,7 @@ x-node: &node
       MODULE: frontend/ds/server
       JAR: ds-server.jar
   env_file:
-    - path: ../configs/.env
+    - path: .env
       required: false
   network_mode: host
   restart: on-failure
@@ -27,7 +25,7 @@ services:
       <<: *env
       NODE_ID: "1"
     volumes:
-      - ../configs:/opt/streamstack/harness/configs:ro
+      - .:/opt/streamstack/topo:ro
       - node1-data:/tmp/streamstack
   node2:
     <<: *node
@@ -35,7 +33,7 @@ services:
       <<: *env
       NODE_ID: "2"
     volumes:
-      - ../configs:/opt/streamstack/harness/configs:ro
+      - .:/opt/streamstack/topo:ro
       - node2-data:/tmp/streamstack
   node3:
     <<: *node
@@ -43,7 +41,7 @@ services:
       <<: *env
       NODE_ID: "3"
     volumes:
-      - ../configs:/opt/streamstack/harness/configs:ro
+      - .:/opt/streamstack/topo:ro
       - node3-data:/tmp/streamstack
 
 volumes:

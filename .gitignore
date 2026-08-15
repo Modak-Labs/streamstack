@@ -32,9 +32,13 @@ dependency-reduced-pom.xml
 *.log
 .env
 .env.*
-harness/configs/.env
-!harness/configs/.env.example
+!.env.example
 
 ### Conformance / temp ###
 server/conformance-run.log
 **/node_modules/
+
+### Docs ###
+/docs/node_modules/
+/docs/.vitepress/cache/
+/docs/.vitepress/dist/
