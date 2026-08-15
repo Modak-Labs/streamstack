@@ -43,6 +43,10 @@ public final class StreamStackNode implements AutoCloseable {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(StreamStackNode.class);
 
+    private static final int STORAGE_READINESS_MAX_ATTEMPTS = 10;
+    private static final long STORAGE_READINESS_INITIAL_BACKOFF_MS = 1_000;
+    private static final long STORAGE_READINESS_MAX_BACKOFF_MS = 30_000;
+
     private final ServerConfig config;
     private final MetadataNode metadataNode;
     private final ObjectStorage objectStorage;
@@ -53,8 +57,10 @@ public final class StreamStackNode implements AutoCloseable {
     private final S3StreamService streamService;
     private final RaftKVClient kvClient;
     private final StreamService service;
+    private final AdminServer adminServer;
 
     private final AtomicBoolean started = new AtomicBoolean(false);
+    private final AtomicBoolean ready = new AtomicBoolean(false);
 
     public StreamStackNode(ServerConfig config) throws Exception {
         this.config = Objects.requireNonNull(config, "config");
@@ -119,6 +125,7 @@ public final class StreamStackNode implements AutoCloseable {
         RaftOwnershipService ownership = new RaftOwnershipService(metadataNode, streamService);
 
         this.service = new StreamService(streamService, streamService, streamService, ownership);
+        this.adminServer = config.adminEnabled() ? new AdminServer(this) : null;
     }
 
     private WalBundle createWal(String walUri, BucketURI dataBucket, ObjectStorage dataStorage) {
@@ -174,14 +181,54 @@ public final class StreamStackNode implements AutoCloseable {
             return;
         }
 
+        if (Objects.nonNull(adminServer)) {
+            adminServer.start();
+        }
+
+        awaitObjectStorageReady();
         metadataNode.awaitLeader(30, TimeUnit.SECONDS);
         metadataNode.awaitRegistered(30, TimeUnit.SECONDS);
         storage.startup();
         compactionManager.start();
+        ready.set(true);
         LOGGER.info(
             "streamstack node started nodeId={} advertised={} raft={}:{} storage={} wal={}",
             config.nodeId(), config.httpAddress(), config.raftHost(), config.raftPort(),
             config.storageUri(), config.resolveWalUri());
+    }
+
+    private void awaitObjectStorageReady() throws InterruptedException {
+        long backoffMs = STORAGE_READINESS_INITIAL_BACKOFF_MS;
+
+        for (int attempt = 1; ; attempt++) {
+            boolean dataReady = storageReady(objectStorage);
+            boolean walReady = Objects.isNull(walObjectStorage) || storageReady(walObjectStorage);
+
+            if (dataReady && walReady) {
+                return;
+            }
+
+            if (attempt >= STORAGE_READINESS_MAX_ATTEMPTS) {
+                throw new IllegalStateException(String.format(
+                    "object storage not ready after %d attempts (data=%b wal=%b), storage=%s wal=%s",
+                    attempt, dataReady, walReady, config.storageUri(), config.resolveWalUri()));
+            }
+
+            LOGGER.warn(
+                "object storage not ready (attempt {}/{}, data={} wal={}), retrying in {}ms",
+                attempt, STORAGE_READINESS_MAX_ATTEMPTS, dataReady, walReady, backoffMs);
+            Thread.sleep(backoffMs);
+            backoffMs = Math.min(backoffMs * 2, STORAGE_READINESS_MAX_BACKOFF_MS);
+        }
+    }
+
+    private static boolean storageReady(ObjectStorage storage) {
+        try {
+            return storage.readinessCheck();
+        } catch (Exception e) {
+            LOGGER.warn("object storage readiness check failed: {}", e.getMessage());
+            return false;
+        }
     }
 
     public StreamService service() {
@@ -208,8 +255,35 @@ public final class StreamStackNode implements AutoCloseable {
         return streamService;
     }
 
+    public boolean isReady() {
+        return ready.get();
+    }
+
+    public void markNotReady() {
+        ready.set(false);
+    }
+
+    public void drainBeforeShutdown() {
+        ready.set(false);
+        int drainSec = config.shutdownDrainSec();
+
+        if (drainSec <= 0) {
+            return;
+        }
+
+        LOGGER.info("draining for {}s before shutdown nodeId={}", drainSec, config.nodeId());
+
+        try {
+            Thread.sleep(TimeUnit.SECONDS.toMillis(drainSec));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     @Override
     public void close() {
+        ready.set(false);
+
         try {
             for (var stream : new ArrayList<>(streamService.openStreamSnapshot())) {
                 try {
@@ -250,6 +324,11 @@ public final class StreamStackNode implements AutoCloseable {
         }
 
         metadataNode.close();
+
+        if (Objects.nonNull(adminServer)) {
+            adminServer.close();
+        }
+
         started.set(false);
     }
 

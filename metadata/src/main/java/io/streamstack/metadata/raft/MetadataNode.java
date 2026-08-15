@@ -293,6 +293,10 @@ public final class MetadataNode implements AutoCloseable {
         return future;
     }
 
+    public Status transferLeader(PeerId peer) {
+        return node.transferLeadershipTo(peer);
+    }
+
     public CompletableFuture<Status> removePeer(PeerId peer) {
         CompletableFuture<Status> future = new CompletableFuture<>();
 

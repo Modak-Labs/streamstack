@@ -1,0 +1,256 @@
+name: E2E
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  ds-single:
+    name: DS single node + MinIO
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build
+        run: mvn -B -ntp package -DskipTests
+
+      - name: Start MinIO and node
+        run: |
+          cp harness/local/.env.example harness/local/.env
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.ds.yml \
+            up -d --build
+
+      - name: Wait for readiness
+        run: timeout 180 bash -c 'until curl -sf http://127.0.0.1:9090/ready; do sleep 2; done'
+
+      - name: Assert admin plane
+        run: |
+          curl -sf http://127.0.0.1:9090/health | grep -qx ok
+          curl -sf http://127.0.0.1:9090/admin/cluster | jq -e '.registered == true and .raft.isLeader == true and .raft.leader != null'
+          curl -sf http://127.0.0.1:9090/admin/nodes | jq -e '.nodes | length == 1'
+          curl -sf -o /dev/null http://127.0.0.1:9090/
+
+      - name: Assert stream lifecycle via admin
+        run: |
+          curl -sf -X PUT -H 'Content-Type: application/json' -d '' http://127.0.0.1:4437/e2e/orders
+          curl -sf -X POST -H 'Content-Type: application/json' -d '{"n":1}' http://127.0.0.1:4437/e2e/orders
+          curl -sf http://127.0.0.1:9090/admin/streams/e2e/orders | jq -e '.ownerLocal == true and .meta.closed == false'
+
+      - name: DS bench
+        run: |
+          java -jar cli/target/streamstack.jar ds bench --endpoint http://127.0.0.1:4437 \
+            -b 1024 -n 64 -w 8 -d 8
+
+      - name: Collect logs
+        if: always()
+        run: |
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.ds.yml \
+            logs --no-color > ds-single-logs.txt || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ds-single-logs
+          path: ds-single-logs.txt
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.ds.yml \
+            down -v || true
+
+  ds-cluster:
+    name: DS three-node cluster + MinIO
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build
+        run: mvn -B -ntp package -DskipTests
+
+      - name: Start MinIO and cluster
+        run: |
+          cp harness/local/.env.example harness/local/.env
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.cluster.ds.yml \
+            up -d --build
+
+      - name: Wait for readiness on all nodes
+        run: |
+          for port in 9091 9092 9093; do
+            timeout 180 bash -c "until curl -sf http://127.0.0.1:${port}/ready; do sleep 2; done"
+          done
+
+      - name: Assert cluster state
+        run: |
+          curl -sf http://127.0.0.1:9091/admin/nodes | jq -e '.nodes | length == 3'
+          leaders=0
+          for port in 9091 9092 9093; do
+            if curl -sf "http://127.0.0.1:${port}/admin/cluster" | jq -e '.raft.isLeader == true' > /dev/null; then
+              leaders=$((leaders + 1))
+            fi
+          done
+          test "$leaders" -eq 1
+
+      - name: Assert ownership redirects
+        run: |
+          curl -sf -X PUT -H 'Content-Type: application/json' -d '' http://127.0.0.1:4437/e2e/redirect
+          curl -sf -X POST -H 'Content-Type: application/json' -d '{"n":1}' http://127.0.0.1:4437/e2e/redirect
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 http://127.0.0.1:4438/e2e/redirect)
+          test "$code" = "307"
+          curl -sfL -m 30 http://127.0.0.1:4438/e2e/redirect | grep -q '"n":1'
+
+      - name: DS bench
+        run: |
+          java -jar cli/target/streamstack.jar ds bench --endpoint http://127.0.0.1:4437 \
+            -b 1024 -n 64 -w 8 -d 8
+
+      - name: Leader failover
+        run: |
+          leader=""
+          for port in 9091 9092 9093; do
+            node=$(curl -sf "http://127.0.0.1:${port}/admin/cluster" | jq -r 'select(.raft.isLeader == true) | .nodeId')
+            if [ -n "$node" ]; then
+              leader="$node"
+            fi
+          done
+          test -n "$leader"
+          echo "killing leader node ${leader}"
+          docker kill "local-node${leader}-1"
+          survivors=""
+          for id in 1 2 3; do
+            if [ "$id" != "$leader" ]; then
+              survivors="$survivors $((9090 + id))"
+            fi
+          done
+          elected=""
+          for attempt in $(seq 1 60); do
+            for port in $survivors; do
+              if curl -sf -m 3 "http://127.0.0.1:${port}/admin/cluster" | jq -e '.raft.isLeader == true' > /dev/null 2>&1; then
+                elected="$port"
+                break 2
+              fi
+            done
+            sleep 2
+          done
+          test -n "$elected"
+          echo "new leader reported by admin port ${elected}"
+          survivor=$(echo "$survivors" | awk '{print $1}')
+          http_port=$((survivor - 9090 + 4436))
+          timeout 120 bash -c "until curl -sf http://127.0.0.1:${survivor}/ready; do sleep 2; done"
+          curl -sf -X PUT -H 'Content-Type: application/json' -d '' "http://127.0.0.1:${http_port}/e2e/failover"
+          curl -sf -X POST -H 'Content-Type: application/json' -d '{"after":"failover"}' "http://127.0.0.1:${http_port}/e2e/failover"
+          curl -sf -m 30 "http://127.0.0.1:${http_port}/e2e/failover" | grep -q '"after":"failover"'
+
+      - name: Collect logs
+        if: always()
+        run: |
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.cluster.ds.yml \
+            logs --no-color > ds-cluster-logs.txt || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ds-cluster-logs
+          path: ds-cluster-logs.txt
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.cluster.ds.yml \
+            down -v || true
+
+  s2-single:
+    name: S2 single node + MinIO
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build
+        run: mvn -B -ntp package -DskipTests
+
+      - name: Start MinIO and node
+        run: |
+          cp harness/local/.env.example harness/local/.env
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.s2.yml \
+            up -d --build
+
+      - name: Wait for readiness
+        run: timeout 180 bash -c 'until curl -sf http://127.0.0.1:9090/ready; do sleep 2; done'
+
+      - name: Assert admin plane
+        run: |
+          curl -sf http://127.0.0.1:9090/health | grep -qx ok
+          curl -sf http://127.0.0.1:9090/admin/cluster | jq -e '.registered == true and .raft.isLeader == true'
+
+      - name: S2 bench
+        run: |
+          java -jar cli/target/streamstack.jar s2 bench --endpoint http://127.0.0.1:4437 e2esmokebasin \
+            -b 1024 -n 64 -w 8 -d 8
+
+      - name: Collect logs
+        if: always()
+        run: |
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.s2.yml \
+            logs --no-color > s2-single-logs.txt || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: s2-single-logs
+          path: s2-single-logs.txt
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.s2.yml \
+            down -v || true

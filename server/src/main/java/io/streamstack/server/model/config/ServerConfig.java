@@ -19,6 +19,7 @@ public final class ServerConfig {
     private final long nodeEpoch;
     private final String httpHost;
     private final int httpPort;
+    private final int adminPort;
     private final String raftHost;
     private final int raftPort;
     private final List<String> raftPeers;
@@ -30,6 +31,7 @@ public final class ServerConfig {
     private final int longPollTimeoutSec;
     private final int sseMaxDurationSec;
     private final int maxChunkSize;
+    private final int shutdownDrainSec;
     private final StreamConfig streamConfig;
     private final Map<String, String> envs;
 
@@ -38,6 +40,7 @@ public final class ServerConfig {
         this.nodeEpoch = builder.nodeEpoch;
         this.httpHost = builder.httpHost;
         this.httpPort = builder.httpPort;
+        this.adminPort = builder.adminPort;
         this.raftHost = builder.raftHost;
         this.raftPort = builder.raftPort;
         this.raftPeers = List.copyOf(builder.raftPeers);
@@ -49,6 +52,7 @@ public final class ServerConfig {
         this.longPollTimeoutSec = builder.longPollTimeoutSec;
         this.sseMaxDurationSec = builder.sseMaxDurationSec;
         this.maxChunkSize = builder.maxChunkSize;
+        this.shutdownDrainSec = builder.shutdownDrainSec;
         this.streamConfig = builder.streamConfig.build();
         this.envs = Map.copyOf(builder.envs);
     }
@@ -71,6 +75,14 @@ public final class ServerConfig {
 
     public int httpPort() {
         return httpPort;
+    }
+
+    public int adminPort() {
+        return adminPort;
+    }
+
+    public boolean adminEnabled() {
+        return adminPort > 0;
     }
 
     public String raftHost() {
@@ -141,6 +153,10 @@ public final class ServerConfig {
         return maxChunkSize;
     }
 
+    public int shutdownDrainSec() {
+        return shutdownDrainSec;
+    }
+
     public StreamConfig streamConfig() {
         return streamConfig;
     }
@@ -190,6 +206,7 @@ public final class ServerConfig {
                 case "--node-epoch" -> builder.nodeEpoch(Long.parseLong(requireValue(args, ++i, arg)));
                 case "--http-host" -> builder.httpHost(requireValue(args, ++i, arg));
                 case "--http-port" -> builder.httpPort(Integer.parseInt(requireValue(args, ++i, arg)));
+                case "--admin-port" -> builder.adminPort(Integer.parseInt(requireValue(args, ++i, arg)));
                 case "--raft-host" -> builder.raftHost(requireValue(args, ++i, arg));
                 case "--raft-port" -> builder.raftPort(Integer.parseInt(requireValue(args, ++i, arg)));
                 case "--peer" -> builder.addPeer(requireValue(args, ++i, arg));
@@ -199,6 +216,8 @@ public final class ServerConfig {
                 case "--wal" -> builder.walUri(requireValue(args, ++i, arg));
                 case "--cluster-id" -> builder.clusterId(requireValue(args, ++i, arg));
                 case "--routing" -> builder.routingMode(RoutingMode.valueOf(requireValue(args, ++i, arg)));
+                case "--shutdown-drain-sec" ->
+                    builder.shutdownDrainSec(Integer.parseInt(requireValue(args, ++i, arg)));
                 case "--wal-cache-size" -> builder.streamConfig().walCacheSize(Long.parseLong(requireValue(args, ++i, arg)));
                 case "--block-cache-size" ->
                     builder.streamConfig().blockCacheSize(Long.parseLong(requireValue(args, ++i, arg)));
@@ -230,6 +249,7 @@ public final class ServerConfig {
         private long nodeEpoch = System.currentTimeMillis();
         private String httpHost = "127.0.0.1";
         private int httpPort = 4437;
+        private int adminPort = 9090;
         private String raftHost = "127.0.0.1";
         private int raftPort = 8091;
         private final List<String> raftPeers = new ArrayList<>();
@@ -241,6 +261,7 @@ public final class ServerConfig {
         private int longPollTimeoutSec = 25;
         private int sseMaxDurationSec = 55;
         private int maxChunkSize = 64 * 1024;
+        private int shutdownDrainSec = 0;
         private final StreamConfig.Builder streamConfig = StreamConfig.builder();
         private final Map<String, String> envs = new LinkedHashMap<>();
         public Builder nodeId(int nodeId) {
@@ -260,6 +281,11 @@ public final class ServerConfig {
 
         public Builder httpPort(int httpPort) {
             this.httpPort = httpPort;
+            return this;
+        }
+
+        public Builder adminPort(int adminPort) {
+            this.adminPort = adminPort;
             return this;
         }
 
@@ -332,6 +358,11 @@ public final class ServerConfig {
             return this;
         }
 
+        public Builder shutdownDrainSec(int shutdownDrainSec) {
+            this.shutdownDrainSec = shutdownDrainSec;
+            return this;
+        }
+
         public StreamConfig.Builder streamConfig() {
             return streamConfig;
         }
@@ -360,6 +391,10 @@ public final class ServerConfig {
 
             if (Objects.nonNull(node.httpPort())) {
                 this.httpPort = node.httpPort();
+            }
+
+            if (Objects.nonNull(node.adminPort())) {
+                this.adminPort = node.adminPort();
             }
 
             this.raftHost = node.host();
@@ -407,6 +442,7 @@ public final class ServerConfig {
                     case "longPollTimeoutSec" -> longPollTimeoutSec(toInt(value));
                     case "sseMaxDurationSec" -> sseMaxDurationSec(toInt(value));
                     case "maxChunkSize" -> maxChunkSize(toInt(value));
+                    case "shutdownDrainSec" -> shutdownDrainSec(toInt(value));
                     case "clusterId" -> clusterId(String.valueOf(value));
                     default -> throw new IllegalArgumentException("unknown topology config key: " + key);
                 }

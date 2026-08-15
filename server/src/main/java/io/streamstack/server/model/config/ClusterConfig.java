@@ -203,6 +203,7 @@ public final class ClusterConfig {
         private String host;
         private int nodeId;
         private Integer httpPort;
+        private Integer adminPort;
         private Integer raftPort;
         private String dataDir;
         public String getHost() {
@@ -227,6 +228,14 @@ public final class ClusterConfig {
 
         public void setHttpPort(Integer httpPort) {
             this.httpPort = httpPort;
+        }
+
+        public Integer getAdminPort() {
+            return adminPort;
+        }
+
+        public void setAdminPort(Integer adminPort) {
+            this.adminPort = adminPort;
         }
 
         public Integer getRaftPort() {
@@ -255,6 +264,10 @@ public final class ClusterConfig {
 
         public Integer httpPort() {
             return httpPort;
+        }
+
+        public Integer adminPort() {
+            return adminPort;
         }
 
         public Integer raftPort() {

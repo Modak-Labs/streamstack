@@ -79,6 +79,8 @@ public final class DurableStreamsServer implements AutoCloseable {
 
     @Override
     public void close() {
+        node.drainBeforeShutdown();
+
         try {
             app.stop();
         } catch (Exception ignored) {

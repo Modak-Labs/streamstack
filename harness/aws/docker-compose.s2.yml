@@ -24,6 +24,7 @@ services:
     ports:
       - "4437:4437"
       - "8091:8091"
+      - "9090:9090"
     restart: on-failure
 
 volumes:

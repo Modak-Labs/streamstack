@@ -11,6 +11,9 @@ fi
 if [ -n "${NODE_ID:-}" ]; then
   set -- "$@" --node-id "$NODE_ID"
 fi
+if [ -n "${ADMIN_PORT:-}" ]; then
+  set -- "$@" --admin-port "$ADMIN_PORT"
+fi
 if [ -n "${DATA_DIR:-}" ]; then
   set -- "$@" --data-dir "$DATA_DIR"
 fi
