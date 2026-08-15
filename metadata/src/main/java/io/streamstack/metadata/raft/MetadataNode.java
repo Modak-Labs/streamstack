@@ -364,6 +364,39 @@ public final class MetadataNode implements AutoCloseable {
         return future;
     }
 
+    public void archiveFinalSnapshot(long timeoutMs) throws InterruptedException {
+        if (Objects.isNull(snapshotArchive) || !node.isLeader()) {
+            return;
+        }
+
+        long target = stateMachine.appliedIndex();
+
+        if (snapshotArchive.lastArchivedIndex() >= target) {
+            return;
+        }
+
+        try {
+            triggerSnapshot();
+        } catch (Exception e) {
+            LOGGER.warn("failed to trigger final metadata snapshot nodeId={}: {}", nodeId, e.getMessage());
+        }
+
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+
+        while (System.nanoTime() < deadline) {
+            if (snapshotArchive.lastArchivedIndex() >= target) {
+                LOGGER.info("archived final metadata snapshot nodeId={} appliedIndex={}", nodeId, target);
+                return;
+            }
+
+            Thread.sleep(50);
+        }
+
+        LOGGER.warn(
+            "timed out archiving final metadata snapshot nodeId={} appliedIndex={} lastArchivedIndex={}",
+            nodeId, target, snapshotArchive.lastArchivedIndex());
+    }
+
     public void triggerSnapshot() throws InterruptedException {
         CompletableFuture<Status> future = new CompletableFuture<>();
 

@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "server/openapi.yml"
+      - "frontend/ds/openapi.yml"
+      - "frontend/s2/openapi.yml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 

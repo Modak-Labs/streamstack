@@ -1,0 +1,409 @@
+openapi: 3.1.0
+info:
+  title: StreamStack Admin
+  version: "1.0"
+  license:
+    name: Apache 2.0
+  description: Admin plane on a separate port from the protocol facade. Default port is 9090.
+servers:
+  - url: http://127.0.0.1:9090
+tags:
+  - name: Health
+  - name: Cluster
+  - name: Membership
+  - name: Streams
+  - name: Snapshots
+paths:
+  /health:
+    get:
+      operationId: health
+      tags: [Health]
+      summary: Liveness
+      description: Returns as soon as the process is up, before raft and storage are ready.
+      responses:
+        "200":
+          description: Alive
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+  /ready:
+    get:
+      operationId: ready
+      tags: [Health]
+      summary: Readiness
+      description: Ready once raft has a leader, the node is registered, and storage started.
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+  /admin/cluster:
+    get:
+      operationId: cluster
+      tags: [Cluster]
+      summary: Cluster and raft status
+      responses:
+        "200":
+          description: Cluster status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cluster"
+  /admin/nodes:
+    get:
+      operationId: nodes
+      tags: [Cluster]
+      summary: Registered nodes
+      responses:
+        "200":
+          description: Nodes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Nodes"
+  /admin/streams/{name}:
+    get:
+      operationId: stream
+      tags: [Streams]
+      summary: Stream owner and metadata
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Stream path without the leading slash. Nested paths are allowed.
+          schema:
+            type: string
+            example: demo/orders
+      responses:
+        "200":
+          description: Stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stream"
+        "404":
+          $ref: "#/components/responses/Error"
+  /admin/peers:
+    post:
+      operationId: addPeer
+      tags: [Membership]
+      summary: Add a raft peer
+      description: Leader only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PeerBody"
+      responses:
+        "200":
+          description: Added
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [added]
+                properties:
+                  added:
+                    type: string
+                    example: 127.0.0.1:8092
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/NotLeader"
+  /admin/peers/{peer}:
+    delete:
+      operationId: removePeer
+      tags: [Membership]
+      summary: Remove a raft peer
+      description: Leader only.
+      parameters:
+        - name: peer
+          in: path
+          required: true
+          description: Raft peer as host:port.
+          schema:
+            type: string
+            example: 127.0.0.1:8092
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties:
+                  removed:
+                    type: string
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/NotLeader"
+  /admin/transfer-leader:
+    post:
+      operationId: transferLeader
+      tags: [Membership]
+      summary: Transfer raft leadership
+      description: Leader only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PeerBody"
+      responses:
+        "200":
+          description: Transferred
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transferredTo]
+                properties:
+                  transferredTo:
+                    type: string
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/NotLeader"
+        "500":
+          $ref: "#/components/responses/Error"
+  /admin/snapshot:
+    post:
+      operationId: triggerSnapshot
+      tags: [Snapshots]
+      summary: Trigger a metadata raft snapshot
+      responses:
+        "200":
+          description: Snapshot triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [appliedIndex]
+                properties:
+                  appliedIndex:
+                    type: integer
+                    format: int64
+  /admin/snapshots:
+    get:
+      operationId: snapshots
+      tags: [Snapshots]
+      summary: Archived metadata snapshots
+      responses:
+        "200":
+          description: Archive status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotArchive"
+        "404":
+          $ref: "#/components/responses/Error"
+components:
+  schemas:
+    Readiness:
+      type: object
+      required: [ready, started, leaderKnown, registered]
+      properties:
+        ready:
+          type: boolean
+        started:
+          type: boolean
+        leaderKnown:
+          type: boolean
+        registered:
+          type: boolean
+    Cluster:
+      type: object
+      required:
+        - clusterId
+        - nodeId
+        - nodeEpoch
+        - advertisedAddress
+        - registered
+        - raft
+        - streamCount
+        - objectCount
+        - destroyedObjectBacklog
+      properties:
+        clusterId:
+          type: string
+        nodeId:
+          type: integer
+        nodeEpoch:
+          type: integer
+          format: int64
+        advertisedAddress:
+          type: string
+        registered:
+          type: boolean
+        raft:
+          $ref: "#/components/schemas/Raft"
+        streamCount:
+          type: integer
+        objectCount:
+          type: integer
+        destroyedObjectBacklog:
+          type: integer
+    Raft:
+      type: object
+      required: [isLeader, appliedIndex, applySuccessCount, applyFailCount]
+      properties:
+        leader:
+          type: string
+          nullable: true
+        isLeader:
+          type: boolean
+        appliedIndex:
+          type: integer
+          format: int64
+        applySuccessCount:
+          type: integer
+          format: int64
+        applyFailCount:
+          type: integer
+          format: int64
+        peers:
+          type: array
+          nullable: true
+          items:
+            type: string
+    Nodes:
+      type: object
+      required: [nodes]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Node"
+    Node:
+      type: object
+      required: [nodeId, nodeEpoch, local]
+      properties:
+        nodeId:
+          type: integer
+        nodeEpoch:
+          type: integer
+          format: int64
+        advertisedAddress:
+          type: string
+          nullable: true
+        local:
+          type: boolean
+    Stream:
+      type: object
+      required: [name, ownerLocal]
+      properties:
+        name:
+          type: string
+        streamId:
+          type: integer
+          format: int64
+          nullable: true
+        ownerLocal:
+          type: boolean
+        ownerNodeId:
+          type: integer
+        ownerAdvertisedAddress:
+          type: string
+        meta:
+          $ref: "#/components/schemas/StreamMeta"
+    StreamMeta:
+      type: object
+      properties:
+        streamId:
+          type: integer
+          format: int64
+        contentType:
+          type: string
+        ttlSeconds:
+          type: integer
+          nullable: true
+        expiresAt:
+          type: string
+          nullable: true
+        startOffset:
+          type: string
+        nextOffset:
+          type: string
+        closed:
+          type: boolean
+    PeerBody:
+      type: object
+      required: [peer]
+      properties:
+        peer:
+          type: string
+          example: 127.0.0.1:8092
+    SnapshotArchive:
+      type: object
+      required: [archiveSuccessCount, archiveFailureCount, lastArchivedIndex, snapshots]
+      properties:
+        archiveSuccessCount:
+          type: integer
+          format: int64
+        archiveFailureCount:
+          type: integer
+          format: int64
+        lastArchivedIndex:
+          type: integer
+          format: int64
+        snapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArchivedSnapshot"
+    ArchivedSnapshot:
+      type: object
+      required: [key, appliedIndex, timestampMs, size]
+      properties:
+        key:
+          type: string
+        appliedIndex:
+          type: integer
+          format: int64
+        timestampMs:
+          type: integer
+          format: int64
+        size:
+          type: integer
+          format: int64
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    NotLeader:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: not raft leader
+        leader:
+          type: string
+          nullable: true
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotLeader:
+      description: Not raft leader
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/NotLeader"

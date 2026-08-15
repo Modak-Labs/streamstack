@@ -80,6 +80,44 @@ public class MetadataArchiveRestoreIntegrationTest {
     }
 
     @Test
+    void acknowledgedTailSurvivesGracefulShutdownAndRestore() throws Exception {
+        Path dataDir = tempDir.resolve("data");
+        Path objectDir = tempDir.resolve("objects");
+
+        try (StreamStackNode node = new StreamStackNode(
+            config(dataDir, objectDir, 1, false, freePort(), 104857600L))) {
+            node.start();
+            StreamService services = node.service();
+
+            assertTrue(services.lifecycle().create(new CreateCommand(
+                "/streams/tail", "text/plain", null, null, false, new byte[0])).created());
+            assertTrue(services.append().append(new AppendCommand(
+                "/streams/tail",
+                List.of("acked-tail".getBytes(StandardCharsets.UTF_8)),
+                "text/plain",
+                null,
+                null,
+                false)).applied());
+        }
+
+        deleteRecursively(dataDir);
+
+        try (StreamStackNode restored = new StreamStackNode(
+            config(dataDir, objectDir, 2, true, freePort(), 104857600L))) {
+            restored.start();
+            assertTrue(restored.metadataNode().restoredFromArchive());
+            StreamService services = restored.service();
+            StreamMeta head = services.lifecycle().head("/streams/tail").orElseThrow();
+
+            assertEquals(1, head.nextOffset().recordOffset());
+            ReadResult batch = services.read().read("/streams/tail", OffsetToken.beginning(), 1024, 0);
+
+            assertEquals(1, batch.records().size());
+            assertEquals("acked-tail", new String(batch.records().get(0).payload(), StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
     void restoreSkippedWhenLocalSnapshotExists() throws Exception {
         Path dataDir = tempDir.resolve("data");
         Path objectDir = tempDir.resolve("objects");
@@ -108,6 +146,11 @@ public class MetadataArchiveRestoreIntegrationTest {
 
     private ServerConfig config(Path dataDir, Path objectDir, long nodeEpoch, boolean restore, int raftPort)
         throws Exception {
+        return config(dataDir, objectDir, nodeEpoch, restore, raftPort, 1L);
+    }
+
+    private ServerConfig config(Path dataDir, Path objectDir, long nodeEpoch, boolean restore, int raftPort,
+        long walUploadThreshold) throws Exception {
         ServerConfig.Builder builder = ServerConfig.builder()
             .nodeId(1)
             .nodeEpoch(nodeEpoch)
@@ -122,7 +165,7 @@ public class MetadataArchiveRestoreIntegrationTest {
             .routingMode(RoutingMode.LOCAL_ALWAYS)
             .restoreFromStorage(restore);
 
-        builder.streamConfig().walUploadThreshold(1L);
+        builder.streamConfig().walUploadThreshold(walUploadThreshold);
 
         return builder.build();
     }
