@@ -120,6 +120,7 @@ public class MultiNodeRoutingIntegrationTest {
             .nodeEpoch(nodeId)
             .httpHost("127.0.0.1")
             .httpPort(httpPort)
+            .adminPort(0)
             .raftHost("127.0.0.1")
             .raftPort(raftPort)
             .raftPeers(peers)
