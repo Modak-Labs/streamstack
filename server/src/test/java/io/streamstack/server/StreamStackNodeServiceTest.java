@@ -7,6 +7,9 @@ import io.streamstack.server.model.CreateCommand;
 import io.streamstack.server.model.CreateResult;
 import io.streamstack.server.model.ReadResult;
 import io.streamstack.server.model.OffsetToken;
+import io.streamstack.server.model.StreamList;
+import io.streamstack.server.model.StreamMeta;
+import io.streamstack.server.model.StreamServiceException;
 import io.streamstack.server.model.config.RoutingMode;
 import io.streamstack.server.model.config.ServerConfig;
 
@@ -19,6 +22,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class StreamStackNodeServiceTest {
@@ -112,6 +116,73 @@ public class StreamStackNodeServiceTest {
             "/streams/batch", OffsetToken.ofRecordOffset(2), 1024, 0);
         assertEquals(1, trimmed.records().size());
         assertEquals("ccc", new String(trimmed.records().get(0).payload(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void listAndMatchSeqViaServices() throws Exception {
+        int raftPort = freePort();
+        ServerConfig config = ServerConfig.builder()
+            .nodeId(1)
+            .nodeEpoch(1)
+            .httpHost("127.0.0.1")
+            .httpPort(freePort())
+            .adminPort(0)
+            .raftHost("127.0.0.1")
+            .raftPort(raftPort)
+            .raftPeers(List.of("127.0.0.1:" + raftPort))
+            .dataDir(tempDir.resolve("data").toFile())
+            .objectDir(tempDir.resolve("objects").toFile())
+            .routingMode(RoutingMode.LOCAL_ALWAYS)
+            .build();
+        try (StreamStackNode node = new StreamStackNode(config)) {
+            node.start();
+            StreamService services = node.service();
+
+            for (String name : List.of("/list/a", "/list/b", "/list/c", "/other/x")) {
+                services.lifecycle().create(new CreateCommand(name, "text/plain", null, null, false, new byte[0]));
+            }
+
+            listByPrefix(services);
+            matchSeq(services);
+        }
+    }
+
+    private static void listByPrefix(StreamService services) throws Exception {
+        StreamList all = services.lifecycle().list("/list/", null, 0);
+
+        assertEquals(List.of("/list/a", "/list/b", "/list/c"),
+            all.streams().stream().map(StreamMeta::name).toList());
+        assertFalse(all.hasMore());
+
+        StreamList page = services.lifecycle().list("/list/", null, 2);
+
+        assertEquals(List.of("/list/a", "/list/b"), page.streams().stream().map(StreamMeta::name).toList());
+        assertTrue(page.hasMore());
+
+        StreamList rest = services.lifecycle().list("/list/", "/list/b", 0);
+
+        assertEquals(List.of("/list/c"), rest.streams().stream().map(StreamMeta::name).toList());
+        assertFalse(rest.hasMore());
+    }
+
+    private static void matchSeq(StreamService services) throws Exception {
+        AppendResult first = services.append().append(appendAt("/list/a", "one", 0L));
+
+        assertTrue(first.applied());
+        assertEquals(1, first.nextOffset().recordOffset());
+
+        StreamServiceException conflict = assertThrows(StreamServiceException.class,
+            () -> services.append().append(appendAt("/list/a", "stale", 0L)));
+
+        assertEquals(StreamServiceException.Kind.MATCH_FAILED, conflict.kind());
+        assertEquals(1, conflict.nextOffset().recordOffset());
+        assertTrue(services.append().append(appendAt("/list/a", "two", 1L)).applied());
+    }
+
+    private static AppendCommand appendAt(String name, String payload, long matchSeq) {
+        return new AppendCommand(
+            name, List.of(payload.getBytes(StandardCharsets.UTF_8)), "text/plain", null, matchSeq, null, false,
+            false);
     }
 
     private static int freePort() throws Exception {

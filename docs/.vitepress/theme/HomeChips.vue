@@ -98,8 +98,8 @@
       </span>
       <h3>Many protocols</h3>
       <p>
-        <code>durable-streams</code> compatible today. Opinionated native API
-        coming soon.
+        The Stream Stack API, plus <code>durable-streams</code> compatibility
+        on the same engine.
       </p>
     </article>
   </section>

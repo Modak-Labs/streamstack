@@ -1,0 +1,52 @@
+x-env: &env
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  TOPO: /opt/streamstack/topo/topo.cluster.yaml
+  DATA_BUCKET: ${DATA_BUCKET:-}
+  WAL_BUCKET: ${WAL_BUCKET:-}
+
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: harness/docker/Dockerfile
+    args:
+      MODULE: frontend/native/server
+      JAR: native-server.jar
+  env_file:
+    - path: .env
+      required: false
+  network_mode: host
+  restart: on-failure
+
+services:
+  node1:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: "1"
+    volumes:
+      - .:/opt/streamstack/topo:ro
+      - node1-data:/tmp/streamstack
+  node2:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: "2"
+    volumes:
+      - .:/opt/streamstack/topo:ro
+      - node2-data:/tmp/streamstack
+  node3:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: "3"
+    volumes:
+      - .:/opt/streamstack/topo:ro
+      - node3-data:/tmp/streamstack
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

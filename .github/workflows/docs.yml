@@ -6,8 +6,8 @@ on:
     paths:
       - "docs/**"
       - "server/openapi.yml"
+      - "frontend/native/openapi.yml"
       - "frontend/ds/openapi.yml"
-      - "frontend/s2/openapi.yml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 

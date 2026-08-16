@@ -9,6 +9,6 @@ function loadSpec(rel: string) {
   return parseSpec(readFileSync(resolve(streamstack, rel), 'utf8'));
 }
 
+export const nativeSpec = loadSpec('frontend/native/openapi.yml');
 export const dsSpec = loadSpec('frontend/ds/openapi.yml');
-export const s2Spec = loadSpec('frontend/s2/openapi.yml');
 export const adminSpec = loadSpec('server/openapi.yml');

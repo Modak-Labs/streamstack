@@ -17,11 +17,11 @@
     <dependencies>
         <dependency>
             <groupId>io.streamstack</groupId>
-            <artifactId>s2-client</artifactId>
+            <artifactId>ds-client</artifactId>
         </dependency>
         <dependency>
             <groupId>io.streamstack</groupId>
-            <artifactId>ds-client</artifactId>
+            <artifactId>native-client</artifactId>
         </dependency>
         <dependency>
             <groupId>info.picocli</groupId>

@@ -13,14 +13,14 @@ public class MainTest {
     void helpListsProtocols() {
         String help = new CommandLine(new Main()).getUsageMessage();
 
-        assertTrue(help.contains("s2"));
         assertTrue(help.contains("ds"));
+        assertTrue(help.contains("native"));
     }
 
     @Test
-    void s2HelpListsRecordCommands() {
+    void nativeHelpListsRecordCommands() {
         CommandLine cmd = new CommandLine(new Main());
-        String help = cmd.getSubcommands().get("s2").getUsageMessage();
+        String help = cmd.getSubcommands().get("native").getUsageMessage();
 
         assertTrue(help.contains("append"));
         assertTrue(help.contains("read"));
@@ -47,11 +47,7 @@ public class MainTest {
     }
 
     @Test
-    void s2UriParse() {
-        Urls.Resource resource = Urls.s2("s2://orders/events");
-
-        assertEquals("orders", resource.basin());
-        assertEquals("events", resource.stream());
+    void dsUrlBuild() {
         assertEquals("http://127.0.0.1:4437/events", Urls.ds("http://127.0.0.1:4437", "events"));
     }
 }

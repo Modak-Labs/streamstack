@@ -19,6 +19,18 @@ mvn clean package
 
 ## Quickstart
 
+Stream Stack (native protocol):
+
+```bash
+cp harness/local/.env.example harness/local/.env
+docker compose --env-file harness/local/.env \
+  -f harness/local/docker-compose.minio.yml \
+  -f harness/local/docker-compose.native.yml \
+  up -d --build
+```
+
+Durable Streams:
+
 ```bash
 cp harness/local/.env.example harness/local/.env
 docker compose --env-file harness/local/.env \
@@ -27,11 +39,21 @@ docker compose --env-file harness/local/.env \
   up -d --build
 ```
 
-Node listens on `127.0.0.1:4437`. MinIO, cluster, AWS, and Fly: [harness/README.md](harness/README.md).
+Node listens on `127.0.0.1:4437`. Admin plane and dashboard: `127.0.0.1:9090`. Cluster, AWS, and Fly deployments are covered in the docs.
 
 ## Deployment
 
 Create data and WAL S3 buckets. Copy `harness/aws/.env.example` to `harness/aws/.env` and fill `AWS_*`, `DATA_BUCKET`, and `WAL_BUCKET`.
+
+Stream Stack (native protocol):
+
+```bash
+docker compose --env-file harness/aws/.env \
+  -f harness/aws/docker-compose.native.yml \
+  up -d --build
+```
+
+Durable Streams:
 
 ```bash
 docker compose --env-file harness/aws/.env \
@@ -39,14 +61,14 @@ docker compose --env-file harness/aws/.env \
   up -d --build
 ```
 
-Swap `docker-compose.ds.yml` for `docker-compose.s2.yml` to run S2 facade. Node listens on `127.0.0.1:4437`. Three nodes: `harness/aws/docker-compose.cluster.ds.yml`.
+Node listens on `127.0.0.1:4437`. Three nodes: `harness/aws/docker-compose.cluster.native.yml` or `harness/aws/docker-compose.cluster.ds.yml`.
 
-Multi-node (3 nodes) local cluster (ports 4437–4439):
+Multi-node (3 nodes) local cluster (ports 4437–4439), swap `native` for `ds` to serve Durable Streams:
 
 ```bash
 docker compose --env-file harness/local/.env \
   -f harness/local/docker-compose.minio.yml \
-  -f harness/local/docker-compose.cluster.ds.yml \
+  -f harness/local/docker-compose.cluster.native.yml \
   up -d --build
 ```
 
