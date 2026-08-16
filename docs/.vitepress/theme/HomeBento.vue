@@ -64,27 +64,6 @@
       </div>
     </article>
 
-    <p class="home-panels__label">Decoupled layers</p>
-
-    <article class="home-panel">
-      <div class="home-panel__copy">
-        <h3>Many protocols, one engine</h3>
-        <p>
-          <code>durable-streams</code> and <code>S2</code> compatible today.
-          Protocol is a separate layer, so more can land. Opinionated native
-          API coming soon.
-        </p>
-      </div>
-      <div class="home-panel__media">
-        <div class="home-panel__terminal">
-          <pre><code><span class="comment"># Durable Streams</span>
--f harness/local/docker-compose.ds.yml
-
-<span class="comment"># S2</span>
--f harness/local/docker-compose.s2.yml</code></pre>
-        </div>
-      </div>
-    </article>
   </section>
 </template>
 

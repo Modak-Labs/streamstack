@@ -2,7 +2,7 @@
 
 Java 17+ (Java 21 recommended). Maven. [Docker](https://docs.docker.com/get-docker/).
 
-Each node includes the `S3Stream` storage engine, the WAL, `JRaft` metadata, and a protocol facade. All of that lives in the same server.
+Each node includes the `S3Stream` storage engine, the WAL, `JRaft` metadata, and the HTTP API. All of that lives in the same server.
 
 ## Start a node
 
@@ -65,14 +65,3 @@ java -jar cli/target/streamstack.jar ds append \
 </div>
 
 `append` reads stdin. Type a line, press enter, repeat. `tail -f` prints each line as it lands.
-
-## Protocol
-
-This example speaks Durable Streams. Same MinIO and port, S2 instead:
-
-```bash
-docker compose --env-file harness/local/.env \
-  -f harness/local/docker-compose.minio.yml \
-  -f harness/local/docker-compose.s2.yml \
-  up -d --build
-```

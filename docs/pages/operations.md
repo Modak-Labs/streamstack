@@ -1,6 +1,6 @@
 # Operations
 
-Every node optionally serves an admin-plane on a separate port, independent of the protocol facade. Default port is `9090`. Set it per node with `adminPort` in the topo, `--admin-port` on the CLI, or `ADMIN_PORT` in the Docker image. Set `0` to disable.
+Every node optionally serves an admin-plane on a separate port, independent of the stream API. Default port is `9090`. Set it per node with `adminPort` in the topo, `--admin-port` on the CLI, or `ADMIN_PORT` in the Docker image. Set `0` to disable.
 
 The admin APIs also power the dashboard with cluster, node, and raft status.
 

@@ -8,7 +8,7 @@ docker compose --env-file harness/aws/.env \
   up -d --build
 ```
 
-Choose a protocol: `docker-compose.ds.yml` or `docker-compose.s2.yml`. The node listens on `127.0.0.1:4437`.
+The node listens on `127.0.0.1:4437`.
 
 The following example has three nodes, on ports `4437-4439`:
 

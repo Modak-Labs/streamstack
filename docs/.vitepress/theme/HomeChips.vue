@@ -98,8 +98,8 @@
       </span>
       <h3>Many protocols</h3>
       <p>
-        <code>durable-streams</code> and <code>S2</code> compatible today.
-        Opinionated native API coming soon.
+        <code>durable-streams</code> compatible today. Opinionated native API
+        coming soon.
       </p>
     </article>
   </section>

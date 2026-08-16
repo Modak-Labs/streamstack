@@ -1,6 +1,6 @@
 # Deployment
 
-Docker image: `harness/docker`. Deploy `StreamStack` on `local`, [aws](/deployment/aws), or [fly](/deployment/fly). Each node: raft, metadata, and the storage engine in one JVM. [Durable Streams](/protocol/durable-streams) and [S2](/protocol/s2) are protocol facades over the same engine. Pick one per deployment.
+Docker image: `harness/docker`. Deploy `StreamStack` on `local`, [aws](/deployment/aws), or [fly](/deployment/fly). Each node: raft, metadata, and the storage engine in one JVM, speaking the [Durable Streams](/protocol/durable-streams) API.
 
 Storage configuration from the topo file (`TOPO`). `DATA_BUCKET` / `WAL_BUCKET` / `BUCKET_NAME` override the topo S3 URIs.
 

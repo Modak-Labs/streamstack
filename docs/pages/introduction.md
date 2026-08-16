@@ -8,4 +8,4 @@ Before landing on StreamStack, one of the early names was `S3: Super Simple Stre
 
 In StreamStack, a stream is a `URL-addressable`, `append-only`, durable sequence of records. Applications are encouraged to use granular, independently addressable streams instead of combining multiple logical streams into a single shared log. Granular does not mean small. Each stream can scale from low to very high read and write throughput, support high fanout, be bottomless and replayable, and be read by `position` or `offset` like any other durable log.
 
-StreamStack's data plane is built on the `S3Stream` storage engine and a write-ahead log, with metadata replicated through `JRaft`. Storage, metadata, and protocol are separate layers. `Durable Streams` and `S2` are protocol facades over the same engine, so each layer can evolve without requiring the others to be rewritten.
+StreamStack's data plane is built on the `S3Stream` storage engine and a write-ahead log, with metadata replicated through `JRaft`. Storage, metadata, and protocol are separate layers, so each can evolve without requiring the others to be rewritten.
