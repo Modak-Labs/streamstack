@@ -9,6 +9,40 @@
     <version>${revision}</version>
     <packaging>pom</packaging>
     <name>streamstack</name>
+    <url>https://github.com/Modak-Labs/streamstack</url>
+    <description>A durable stream engine on object storage.</description>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>modak-labs</id>
+            <name>Modak Labs</name>
+            <url>https://github.com/Modak-Labs</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/Modak-Labs/streamstack.git</connection>
+        <developerConnection>scm:git:git@github.com:Modak-Labs/streamstack.git</developerConnection>
+        <url>https://github.com/Modak-Labs/streamstack</url>
+    </scm>
+
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/Modak-Labs/streamstack</url>
+        </repository>
+        <snapshotRepository>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/Modak-Labs/streamstack</url>
+        </snapshotRepository>
+    </distributionManagement>
 
     <modules>
         <module>stream</module>
@@ -51,6 +85,8 @@
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.1.2</maven-surefire-plugin.version>
         <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
+        <maven-deploy-plugin.version>3.1.4</maven-deploy-plugin.version>
+        <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
         <exec-maven-plugin.version>3.5.0</exec-maven-plugin.version>
         <aspectj-maven-plugin.version>1.13.1</aspectj-maven-plugin.version>
         <flatten-maven-plugin.version>1.8.0</flatten-maven-plugin.version>
@@ -287,6 +323,19 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-shade-plugin</artifactId>
                     <version>${maven-shade-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-deploy-plugin</artifactId>
+                    <version>${maven-deploy-plugin.version}</version>
+                    <configuration>
+                        <skip>true</skip>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-source-plugin</artifactId>
+                    <version>${maven-source-plugin.version}</version>
                 </plugin>
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>

@@ -143,6 +143,7 @@ export default defineConfig({
       provider: 'local',
     },
     socialLinks: [
+      { icon: 'discord', link: 'https://discord.gg/ETfTbRfkb2' },
       { icon: 'github', link: 'https://github.com/Modak-Labs/streamstack' },
     ],
     outline: {

@@ -2,6 +2,8 @@
 
 A durable stream engine on object storage, with storage, metadata, and protocol as the three primary decoupled layers.
 
+Join the [Discord](https://discord.gg/ETfTbRfkb2) for questions, ideas, and development updates.
+
 <p align="left">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/pages/assets/images/architecture-dark.svg">
