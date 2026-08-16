@@ -8,6 +8,7 @@ public record AppendCommand(
     List<byte[]> payloads,
     String contentType,
     String streamSeq,
+    Long matchSeq,
     Producer producer,
     boolean closeAfter,
     boolean atomic) {
@@ -27,8 +28,19 @@ public record AppendCommand(
         String contentType,
         String streamSeq,
         Producer producer,
+        boolean closeAfter,
+        boolean atomic) {
+        this(name, payloads, contentType, streamSeq, null, producer, closeAfter, atomic);
+    }
+
+    public AppendCommand(
+        String name,
+        List<byte[]> payloads,
+        String contentType,
+        String streamSeq,
+        Producer producer,
         boolean closeAfter) {
-        this(name, payloads, contentType, streamSeq, producer, closeAfter, false);
+        this(name, payloads, contentType, streamSeq, null, producer, closeAfter, false);
     }
 
     public boolean hasProducer() {

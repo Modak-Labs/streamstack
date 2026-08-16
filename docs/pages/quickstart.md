@@ -6,7 +6,18 @@ Each node includes the `S3Stream` storage engine, the WAL, `JRaft` metadata, and
 
 ## Start a node
 
-```bash
+::: code-group
+
+```bash [Stream Stack]
+mvn clean package
+cp harness/local/.env.example harness/local/.env
+docker compose --env-file harness/local/.env \
+  -f harness/local/docker-compose.minio.yml \
+  -f harness/local/docker-compose.native.yml \
+  up -d --build
+```
+
+```bash [Durable Streams]
 mvn clean package
 cp harness/local/.env.example harness/local/.env
 docker compose --env-file harness/local/.env \
@@ -14,6 +25,8 @@ docker compose --env-file harness/local/.env \
   -f harness/local/docker-compose.ds.yml \
   up -d --build
 ```
+
+:::
 
 The node listens on `127.0.0.1:4437`. MinIO console: http://127.0.0.1:9001 (`minioadmin` / `minioadmin`).
 
@@ -33,10 +46,19 @@ Create a stream, then tail in one terminal and append in another.
 
 <span class="ss-cli__label">Create</span>
 
-```bash
+::: code-group
+
+```bash [Stream Stack]
+java -jar cli/target/streamstack.jar native create \
+  --endpoint http://127.0.0.1:4437 demo
+```
+
+```bash [Durable Streams]
 java -jar cli/target/streamstack.jar ds create \
   --endpoint http://127.0.0.1:4437 demo
 ```
+
+:::
 
 </div>
 
@@ -44,10 +66,19 @@ java -jar cli/target/streamstack.jar ds create \
 
 <span class="ss-cli__label">Tail</span>
 
-```bash
+::: code-group
+
+```bash [Stream Stack]
+java -jar cli/target/streamstack.jar native tail \
+  --endpoint http://127.0.0.1:4437 demo
+```
+
+```bash [Durable Streams]
 java -jar cli/target/streamstack.jar ds tail -f \
   --endpoint http://127.0.0.1:4437 demo
 ```
+
+:::
 
 </div>
 
@@ -55,13 +86,24 @@ java -jar cli/target/streamstack.jar ds tail -f \
 
 <span class="ss-cli__label">Append</span>
 
-```bash
+::: code-group
+
+```bash [Stream Stack]
+java -jar cli/target/streamstack.jar native append \
+  --endpoint http://127.0.0.1:4437 demo
+```
+
+```bash [Durable Streams]
 java -jar cli/target/streamstack.jar ds append \
   --endpoint http://127.0.0.1:4437 demo
 ```
 
-</div>
+:::
 
 </div>
 
-`append` reads stdin. Type a line, press enter, repeat. `tail -f` prints each line as it lands.
+</div>
+
+`append` reads stdin. Type a line, press enter, repeat. `tail` prints each line as it lands (with its sequence number on Stream Stack).
+
+The tabs pick the protocol. Both speak HTTP on the same port; run the node with the matching compose file from [Start a node](#start-a-node).

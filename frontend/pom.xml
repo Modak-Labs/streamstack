@@ -16,7 +16,7 @@
     <name>streamstack-frontend</name>
 
     <modules>
-        <module>s2</module>
         <module>ds</module>
+        <module>native</module>
     </modules>
 </project>

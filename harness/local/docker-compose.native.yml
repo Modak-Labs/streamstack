@@ -1,0 +1,33 @@
+services:
+  node1:
+    build:
+      context: ../..
+      dockerfile: harness/docker/Dockerfile
+      args:
+        MODULE: frontend/native/server
+        JAR: native-server.jar
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      TOPO: /opt/streamstack/topo/topo.yaml
+      NODE_ID: "1"
+      METADATA_ARCHIVE: ${METADATA_ARCHIVE:-}
+      RESTORE_FROM_STORAGE: ${RESTORE_FROM_STORAGE:-}
+    volumes:
+      - .:/opt/streamstack/topo:ro
+      - node1-data:/tmp/streamstack
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "4437:4437"
+      - "8091:8091"
+      - "9090:9090"
+    restart: on-failure
+
+volumes:
+  node1-data:

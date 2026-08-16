@@ -4,7 +4,7 @@ import java.util.Objects;
 
 public final class StreamServiceException extends Exception {
 
-    public enum Kind { NOT_FOUND, CONFLICT, CLOSED, BAD_REQUEST, FENCED, SEQUENCE_GAP, DURABILITY }
+    public enum Kind { NOT_FOUND, CONFLICT, CLOSED, BAD_REQUEST, FENCED, SEQUENCE_GAP, MATCH_FAILED, DURABILITY }
     private final Kind kind;
     private final OffsetToken nextOffset;
     private final boolean closed;

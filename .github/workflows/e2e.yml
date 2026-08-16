@@ -236,8 +236,8 @@ jobs:
             -f harness/local/docker-compose.cluster.ds.yml \
             down -v || true
 
-  s2-single:
-    name: S2 single node + MinIO
+  native-single:
+    name: Native single node + MinIO
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -259,7 +259,7 @@ jobs:
           cp harness/local/.env.example harness/local/.env
           docker compose --env-file harness/local/.env \
             -f harness/local/docker-compose.minio.yml \
-            -f harness/local/docker-compose.s2.yml \
+            -f harness/local/docker-compose.native.yml \
             up -d --build
 
       - name: Wait for readiness
@@ -270,9 +270,38 @@ jobs:
           curl -sf http://127.0.0.1:9090/health | grep -qx ok
           curl -sf http://127.0.0.1:9090/admin/cluster | jq -e '.registered == true and .raft.isLeader == true'
 
-      - name: S2 bench
+      - name: Assert native protocol
         run: |
-          java -jar cli/target/streamstack.jar s2 bench --endpoint http://127.0.0.1:4437 e2esmokebasin \
+          curl -sf -X PUT -H 'Content-Type: text/plain' http://127.0.0.1:4437/e2e/native
+          curl -sf -X POST -H 'Content-Type: application/vnd.streamstack.batch+json' \
+            -d '{"records":[{"headers":{"k":"v"},"body":"one"},{"body":"two"}]}' \
+            http://127.0.0.1:4437/e2e/native -D headers.txt -o /dev/null
+          grep -qi 'SS-Next-Seq: 2' headers.txt
+          curl -sf 'http://127.0.0.1:4437/e2e/native?seq=0' | jq -e 'length == 2 and .[0].body == "one" and .[1].seq == 1'
+          curl -sf 'http://127.0.0.1:4437/?prefix=/e2e/' | jq -e '.streams | length == 1'
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Content-Type: text/plain' -H 'SS-Match-Seq: 0' -d 'stale' http://127.0.0.1:4437/e2e/native)
+          test "$code" = "412"
+
+      - name: Native bench (raw and batched)
+        run: |
+          java -jar cli/target/streamstack.jar native bench --endpoint http://127.0.0.1:4437 \
+            -b 1024 -n 1 -w 8 -d 8
+          java -jar cli/target/streamstack.jar native bench --endpoint http://127.0.0.1:4437 \
+            -b 1024 -n 64 -w 8 -d 8
+
+      - name: DS bench comparison
+        run: |
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.native.yml \
+            rm -sf node1
+          docker compose --env-file harness/local/.env \
+            -f harness/local/docker-compose.minio.yml \
+            -f harness/local/docker-compose.ds.yml \
+            up -d --build node1
+          timeout 180 bash -c 'until curl -sf http://127.0.0.1:9090/ready; do sleep 2; done'
+          java -jar cli/target/streamstack.jar ds bench --endpoint http://127.0.0.1:4437 \
             -b 1024 -n 64 -w 8 -d 8
 
       - name: Collect logs
@@ -280,20 +309,20 @@ jobs:
         run: |
           docker compose --env-file harness/local/.env \
             -f harness/local/docker-compose.minio.yml \
-            -f harness/local/docker-compose.s2.yml \
-            logs --no-color > s2-single-logs.txt || true
+            -f harness/local/docker-compose.native.yml \
+            logs --no-color > native-single-logs.txt || true
 
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: s2-single-logs
-          path: s2-single-logs.txt
+          name: native-single-logs
+          path: native-single-logs.txt
 
       - name: Teardown
         if: always()
         run: |
           docker compose --env-file harness/local/.env \
             -f harness/local/docker-compose.minio.yml \
-            -f harness/local/docker-compose.s2.yml \
+            -f harness/local/docker-compose.native.yml \
             down -v || true

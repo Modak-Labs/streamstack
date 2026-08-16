@@ -28,6 +28,7 @@ import io.streamstack.server.model.CreateResult;
 import io.streamstack.server.model.Producer;
 import io.streamstack.server.model.ReadResult;
 import io.streamstack.server.model.CloseResult;
+import io.streamstack.server.model.StreamList;
 import io.streamstack.server.model.StreamMeta;
 import io.streamstack.server.model.OffsetToken;
 import io.streamstack.server.model.StreamRecord;
@@ -55,6 +56,10 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class S3StreamService implements StreamLifecycleService, AppendService, ReadService {
 
     private static final long OP_TIMEOUT_SEC = 30;
+
+    private static final int DEFAULT_LIST_LIMIT = 1000;
+
+    private static final int MAX_LIST_LIMIT = 10000;
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -142,6 +147,87 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
         } catch (Exception e) {
             throw wrap(e);
         }
+    }
+
+    @Override
+    public StreamList list(String prefix, String startAfter, int limit) throws StreamServiceException {
+        try {
+            int max = limit > 0 ? Math.min(limit, MAX_LIST_LIMIT) : DEFAULT_LIST_LIMIT;
+            List<KeyValue> entries = kvClient.listKV(Key.of(normalize(prefix))).get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+            Map<String, RegistryEntry> selected = select(entries, startAfter, max);
+
+            return new StreamList(toMetas(selected, max), selected.size() > max);
+        } catch (Exception e) {
+            throw wrap(e);
+        }
+    }
+
+    private Map<String, RegistryEntry> select(List<KeyValue> entries, String startAfter, int max) {
+        Map<String, RegistryEntry> selected = new LinkedHashMap<>();
+        long now = System.currentTimeMillis();
+
+        for (KeyValue kv : entries) {
+            String name = kv.key().get();
+
+            if (Objects.nonNull(startAfter) && !startAfter.isEmpty() && name.compareTo(startAfter) <= 0) {
+                continue;
+            }
+
+            RegistryEntry entry = decode(kv);
+
+            if (Objects.isNull(entry) || entry.deadlineMs() > 0 && now > entry.deadlineMs()) {
+                continue;
+            }
+
+            selected.put(name, entry);
+
+            if (selected.size() > max) {
+                break;
+            }
+        }
+
+        return selected;
+    }
+
+    private static RegistryEntry decode(KeyValue kv) {
+        try {
+            return RegistryEntry.decode(toBytes(kv.value()));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private List<StreamMeta> toMetas(Map<String, RegistryEntry> selected, int max) throws Exception {
+        List<Long> ids = selected.values().stream().limit(max).map(RegistryEntry::streamId).toList();
+        Map<Long, StreamMetadata> byId = committed(ids);
+        List<StreamMeta> streams = new ArrayList<>(ids.size());
+
+        for (Map.Entry<String, RegistryEntry> e : selected.entrySet()) {
+            if (streams.size() == max) {
+                break;
+            }
+
+            streams.add(toMeta(e.getKey(), e.getValue(), byId.get(e.getValue().streamId())));
+        }
+
+        return streams;
+    }
+
+    private Map<Long, StreamMetadata> committed(List<Long> ids) throws Exception {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+
+        List<StreamMetadata> metas = metadataNode.client().readIndex(() ->
+            metadataNode.stateMachine().streamControlManager().getStreams(ids))
+            .get(OP_TIMEOUT_SEC, TimeUnit.SECONDS);
+        Map<Long, StreamMetadata> byId = new LinkedHashMap<>();
+
+        for (StreamMetadata meta : metas) {
+            byId.put(meta.streamId(), meta);
+        }
+
+        return byId;
     }
 
     @Override
@@ -247,6 +333,12 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
 
                 if (entry.closed()) {
                     return SubmittedAppendResult.completed(appendToClosed(entry, command, producer, next));
+                }
+
+                if (Objects.nonNull(command.matchSeq()) && command.matchSeq() != next.recordOffset()) {
+                    throw new StreamServiceException(
+                        StreamServiceException.Kind.MATCH_FAILED, next, false,
+                        "match failed: expected tail " + command.matchSeq() + ", actual " + next.recordOffset());
                 }
 
                 boolean closeOnly = command.concatenatedPayload().length == 0 && command.closeAfter();
@@ -973,15 +1065,27 @@ public final class S3StreamService implements StreamLifecycleService, AppendServ
     }
 
     private StreamMeta toMeta(String name, RegistryEntry entry, Stream stream) throws Exception {
+        return toMeta(name, entry,
+            Math.max(stream.startOffset(), 0), stream.confirmOffset(), stream.nextOffset());
+    }
+
+    private static StreamMeta toMeta(String name, RegistryEntry entry, StreamMetadata committed) {
+        long start = Objects.isNull(committed) ? 0 : Math.max(committed.startOffset(), 0);
+        long end = Objects.isNull(committed) ? 0 : Math.max(committed.endOffset(), 0);
+
+        return toMeta(name, entry, start, end, end);
+    }
+
+    private static StreamMeta toMeta(String name, RegistryEntry entry, long start, long next, long submitted) {
         return new StreamMeta(
             name,
             entry.streamId(),
             entry.contentType(),
             entry.ttlSeconds(),
             entry.expiresAt(),
-            OffsetToken.ofRecordOffset(Math.max(stream.startOffset(), 0)),
-            OffsetToken.ofRecordOffset(stream.confirmOffset()),
-            OffsetToken.ofRecordOffset(stream.nextOffset()),
+            OffsetToken.ofRecordOffset(start),
+            OffsetToken.ofRecordOffset(next),
+            OffsetToken.ofRecordOffset(submitted),
             entry.closed());
     }
 

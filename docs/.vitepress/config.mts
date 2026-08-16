@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitepress';
 import { useSidebar } from 'vitepress-openapi';
-import { adminSpec, dsSpec, s2Spec } from './specs';
+import { adminSpec, dsSpec, nativeSpec } from './specs';
 
 function sideItem(label: string, link: string, path: string) {
   return {
@@ -41,21 +41,21 @@ const docsSidebar = [
     items: [
       {
         ...sideItem(
+          'Stream Stack',
+          '/protocol/native',
+          '<path d="M4 17V7l6 10V7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 7h6M17 7v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+        ),
+        collapsed: true,
+        items: operationItems(nativeSpec, '/protocol/native/'),
+      },
+      {
+        ...sideItem(
           'Durable Streams',
           '/protocol/durable-streams',
           '<path d="M4 12c2-4 4-4 6 0s4 4 6 0 4-4 4 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
         ),
         collapsed: true,
         items: operationItems(dsSpec, '/protocol/durable-streams/'),
-      },
-      {
-        ...sideItem(
-          'S2',
-          '/protocol/s2',
-          '<path d="M7 8h7.5a3.5 3.5 0 1 1 0 7H9.5a3.5 3.5 0 1 0 0 7H17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
-        ),
-        collapsed: true,
-        items: operationItems(s2Spec, '/protocol/s2/'),
       },
     ],
   },

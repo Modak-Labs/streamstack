@@ -1,7 +1,7 @@
 package io.streamstack.cli;
 
 import io.streamstack.cli.ds.DsCommand;
-import io.streamstack.cli.s2.S2Command;
+import io.streamstack.cli.ss.SsCommand;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -13,7 +13,7 @@ import java.util.Objects;
 @Command(
     name = "streamstack",
     mixinStandardHelpOptions = true,
-    subcommands = {S2Command.class, DsCommand.class})
+    subcommands = {SsCommand.class, DsCommand.class})
 public final class Main implements Runnable {
 
     @Option(

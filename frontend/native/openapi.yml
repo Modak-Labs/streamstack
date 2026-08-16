@@ -1,0 +1,403 @@
+openapi: 3.1.0
+info:
+  title: StreamStack
+  version: "1.0"
+  description: >
+    The native StreamStack protocol. Streams are URL paths. Records carry a
+    sequence number, a server-assigned monotonic timestamp, optional headers,
+    and a body. Appends support batches, idempotent producer sessions, and
+    optimistic tail matching. Default HTTP port is 4437.
+  license:
+    name: Apache 2.0
+servers:
+  - url: http://127.0.0.1:4437
+paths:
+  /:
+    get:
+      operationId: listStreams
+      summary: List streams
+      parameters:
+        - name: prefix
+          in: query
+          schema:
+            type: string
+            default: /
+        - name: start_after
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+      responses:
+        "200":
+          description: Streams ordered by name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamList"
+        "400":
+          $ref: "#/components/responses/Error"
+  /{stream}:
+    parameters:
+      - name: stream
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      operationId: create
+      summary: Create stream
+      parameters:
+        - name: Content-Type
+          in: header
+          schema:
+            type: string
+            default: application/octet-stream
+        - name: SS-TTL
+          in: header
+          schema:
+            type: string
+            pattern: "^(0|[1-9][0-9]*)$"
+        - name: SS-Expires-At
+          in: header
+          schema:
+            type: string
+            format: date-time
+        - name: SS-Closed
+          in: header
+          schema:
+            type: string
+            enum: ["true"]
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location:
+              schema:
+                type: string
+            SS-Next-Seq:
+              $ref: "#/components/headers/SS-Next-Seq"
+        "200":
+          description: Exists with matching configuration
+          headers:
+            SS-Next-Seq:
+              $ref: "#/components/headers/SS-Next-Seq"
+            SS-Closed:
+              $ref: "#/components/headers/SS-Closed"
+        "409":
+          $ref: "#/components/responses/Error"
+    head:
+      operationId: headStream
+      summary: Stream metadata
+      responses:
+        "200":
+          description: Metadata in headers
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            SS-Start-Seq:
+              $ref: "#/components/headers/SS-Start-Seq"
+            SS-Next-Seq:
+              $ref: "#/components/headers/SS-Next-Seq"
+            SS-Closed:
+              $ref: "#/components/headers/SS-Closed"
+            SS-TTL:
+              schema:
+                type: string
+            SS-Expires-At:
+              schema:
+                type: string
+                format: date-time
+        "404":
+          description: No such stream
+    post:
+      operationId: append
+      summary: Append, trim, or close
+      description: >
+        The request Content-Type selects the append mode. The batch media
+        types carry multiple records with headers. Any other Content-Type
+        appends the raw body as a single record. An empty body with SS-Closed
+        closes the stream. An empty body with SS-Trim-Seq trims it.
+      parameters:
+        - name: Content-Type
+          in: header
+          schema:
+            type: string
+        - name: SS-Match-Seq
+          in: header
+          description: Append only if the tail equals this sequence number
+          schema:
+            type: string
+            pattern: "^(0|[1-9][0-9]*)$"
+        - name: SS-Producer-Id
+          in: header
+          schema:
+            type: string
+        - name: SS-Producer-Epoch
+          in: header
+          schema:
+            type: string
+            pattern: "^(0|[1-9][0-9]*)$"
+        - name: SS-Producer-Seq
+          in: header
+          schema:
+            type: string
+            pattern: "^(0|[1-9][0-9]*)$"
+        - name: SS-Closed
+          in: header
+          schema:
+            type: string
+            enum: ["true"]
+        - name: SS-Trim-Seq
+          in: header
+          schema:
+            type: string
+            pattern: "^(0|[1-9][0-9]*)$"
+      requestBody:
+        content:
+          application/vnd.streamstack.batch+json:
+            schema:
+              $ref: "#/components/schemas/AppendBatch"
+          application/vnd.streamstack.batch:
+            schema:
+              type: string
+              format: binary
+          "*/*":
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Appended
+          headers:
+            SS-Start-Seq:
+              description: Sequence number of the first appended record
+              $ref: "#/components/headers/SS-Start-Seq"
+            SS-Next-Seq:
+              $ref: "#/components/headers/SS-Next-Seq"
+            SS-Timestamp:
+              description: Timestamp assigned to the batch
+              schema:
+                type: string
+            SS-Producer-Epoch:
+              schema:
+                type: string
+            SS-Producer-Seq:
+              schema:
+                type: string
+        "403":
+          description: Stale producer epoch
+          headers:
+            SS-Producer-Epoch:
+              schema:
+                type: string
+        "404":
+          description: No such stream
+        "409":
+          description: Closed stream or producer sequence gap
+          headers:
+            SS-Next-Seq:
+              $ref: "#/components/headers/SS-Next-Seq"
+            SS-Expected-Seq:
+              schema:
+                type: string
+            SS-Received-Seq:
+              schema:
+                type: string
+        "412":
+          description: SS-Match-Seq did not match the tail
+          headers:
+            SS-Next-Seq:
+              $ref: "#/components/headers/SS-Next-Seq"
+    get:
+      operationId: read
+      summary: Read records
+      parameters:
+        - name: seq
+          in: query
+          description: Start sequence number, or "now" for the current tail
+          schema:
+            type: string
+            default: "0"
+        - name: count
+          in: query
+          description: Maximum records to return
+          schema:
+            type: integer
+            minimum: 1
+        - name: bytes
+          in: query
+          description: Maximum payload bytes per page, up to 4 MiB (default 64 KiB)
+          schema:
+            type: integer
+            minimum: 1
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, binary, raw]
+            default: json
+        - name: live
+          in: query
+          schema:
+            type: string
+            enum: [long-poll, sse]
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Records from seq
+          headers:
+            SS-Next-Seq:
+              $ref: "#/components/headers/SS-Next-Seq"
+            SS-Up-To-Date:
+              schema:
+                type: string
+                enum: ["true"]
+            SS-Closed:
+              $ref: "#/components/headers/SS-Closed"
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Record"
+            application/vnd.streamstack.batch:
+              schema:
+                type: string
+                format: binary
+            "*/*":
+              schema:
+                type: string
+                format: binary
+            text/event-stream:
+              schema:
+                type: string
+        "204":
+          description: Up to date, no new records (live reads)
+          headers:
+            SS-Next-Seq:
+              $ref: "#/components/headers/SS-Next-Seq"
+            SS-Cursor:
+              schema:
+                type: string
+        "304":
+          description: Not modified (If-None-Match)
+        "404":
+          description: No such stream
+    delete:
+      operationId: deleteStream
+      summary: Delete stream
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: No such stream
+components:
+  headers:
+    SS-Start-Seq:
+      schema:
+        type: string
+    SS-Next-Seq:
+      schema:
+        type: string
+    SS-Closed:
+      schema:
+        type: string
+        enum: ["true"]
+  schemas:
+    Record:
+      type: object
+      properties:
+        seq:
+          type: integer
+          format: int64
+        timestamp:
+          type: integer
+          format: int64
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        body:
+          type: string
+        body_b64:
+          type: string
+          description: Set instead of body when the payload is not valid UTF-8
+      required: [seq, timestamp]
+    AppendBatch:
+      type: object
+      properties:
+        records:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            properties:
+              headers:
+                type: object
+                additionalProperties:
+                  type: string
+              body:
+                type: string
+              body_b64:
+                type: string
+      required: [records]
+    StreamList:
+      type: object
+      properties:
+        streams:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              content_type:
+                type: string
+              start_seq:
+                type: integer
+                format: int64
+              next_seq:
+                type: integer
+                format: int64
+              closed:
+                type: boolean
+              ttl:
+                type: integer
+                format: int64
+              expires_at:
+                type: string
+                format: date-time
+            required: [name, start_seq, next_seq, closed]
+        has_more:
+          type: boolean
+      required: [streams, has_more]
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        next_seq:
+          type: integer
+          format: int64
+      required: [error]
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

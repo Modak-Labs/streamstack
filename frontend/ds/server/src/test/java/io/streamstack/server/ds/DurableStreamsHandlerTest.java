@@ -16,6 +16,7 @@ import io.streamstack.server.model.NodeMeta;
 import io.streamstack.server.model.Owner;
 import io.streamstack.server.model.ReadResult;
 import io.streamstack.server.model.CloseResult;
+import io.streamstack.server.model.StreamList;
 import io.streamstack.server.model.StreamMeta;
 import io.streamstack.server.model.OffsetToken;
 import io.streamstack.server.model.StreamRecord;
@@ -220,6 +221,20 @@ public class DurableStreamsHandlerTest {
         public Optional<StreamMeta> head(String name) {
             Entry entry = streams.get(name);
             return Objects.isNull(entry) ? Optional.empty() : Optional.of(entry.meta());
+        }
+
+        @Override
+        public StreamList list(String prefix, String startAfter, int limit) {
+            int max = limit > 0 ? limit : Integer.MAX_VALUE;
+            List<StreamMeta> out = streams.entrySet().stream()
+                .filter(e -> e.getKey().startsWith(prefix))
+                .filter(e -> Objects.isNull(startAfter) || e.getKey().compareTo(startAfter) > 0)
+                .sorted(Map.Entry.comparingByKey())
+                .limit(max)
+                .map(e -> e.getValue().meta())
+                .toList();
+
+            return new StreamList(out, false);
         }
 
         @Override

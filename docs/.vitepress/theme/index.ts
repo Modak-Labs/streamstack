@@ -7,6 +7,7 @@ import HeroDither from './HeroDither.vue';
 import HomeChips from './HomeChips.vue';
 import HomeBento from './HomeBento.vue';
 import SiteLogo from './SiteLogo.vue';
+import { setupProtocolTabs } from './protocolTabs';
 import 'vitepress-openapi/dist/style.css';
 import './custom.css';
 
@@ -23,7 +24,18 @@ export default {
         h('p', { class: 'ss-doc-copyright' }, '© 2026 Modak Labs. Apache 2.0.'),
     });
   },
-  enhanceApp({ app }) {
+  enhanceApp({ app, router }) {
     openapiTheme.enhanceApp({ app });
+
+    if (typeof window !== 'undefined') {
+      setupProtocolTabs((hook) => {
+        const previous = router.onAfterRouteChange;
+
+        router.onAfterRouteChange = async (to) => {
+          await previous?.(to);
+          hook();
+        };
+      });
+    }
   },
 } satisfies Theme;
