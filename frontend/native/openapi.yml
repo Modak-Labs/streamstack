@@ -263,6 +263,8 @@ paths:
                 enum: ["true"]
             SS-Closed:
               $ref: "#/components/headers/SS-Closed"
+            SS-Cursor:
+              $ref: "#/components/headers/SS-Cursor"
             ETag:
               schema:
                 type: string
@@ -289,8 +291,13 @@ paths:
             SS-Next-Seq:
               $ref: "#/components/headers/SS-Next-Seq"
             SS-Cursor:
+              $ref: "#/components/headers/SS-Cursor"
+            SS-Up-To-Date:
               schema:
                 type: string
+                enum: ["true"]
+            SS-Closed:
+              $ref: "#/components/headers/SS-Closed"
         "304":
           description: Not modified (If-None-Match)
         "404":
@@ -315,6 +322,9 @@ components:
       schema:
         type: string
         enum: ["true"]
+    SS-Cursor:
+      schema:
+        type: string
   schemas:
     Record:
       type: object

@@ -1,33 +1,32 @@
-package io.streamstack.server.ds;
+package io.streamstack.server.api;
 
 import io.javalin.http.Context;
-import io.streamstack.ds.model.Protocol;
-import io.streamstack.server.service.OwnershipService;
-import io.streamstack.server.service.StreamService;
+import io.streamstack.model.Protocol;
 import io.streamstack.server.model.NodeMeta;
 import io.streamstack.server.model.Owner;
 import io.streamstack.server.model.config.RoutingMode;
+import io.streamstack.server.service.OwnershipService;
+import io.streamstack.server.service.StreamService;
 
 import java.util.Objects;
 
 public final class OwnershipRouter {
 
     private final OwnershipService ownership;
-    private final DurableStreamsHandler handler;
+    private final NativeHandler handler;
     private final RoutingMode mode;
 
-    public OwnershipRouter(StreamService service, DurableStreamsHandler handler, RoutingMode mode) {
-        this(service.ownership(), handler, mode);
-    }
-
-    public OwnershipRouter(OwnershipService ownership, DurableStreamsHandler handler, RoutingMode mode) {
-        this.ownership = Objects.requireNonNull(ownership, "ownership");
+    public OwnershipRouter(StreamService service, NativeHandler handler, RoutingMode mode) {
+        this.ownership = Objects.requireNonNull(service.ownership(), "ownership");
         this.handler = Objects.requireNonNull(handler, "handler");
         this.mode = Objects.isNull(mode) ? RoutingMode.REDIRECT : mode;
     }
 
     public void handle(Context ctx) {
+        String name = NativeHandler.streamName(ctx);
+
         if (mode == RoutingMode.LOCAL_ALWAYS
+            || "/".equals(name)
             || "PUT".equals(ctx.method().name())
             || "OPTIONS".equals(ctx.method().name())) {
             handler.handle(ctx);
@@ -35,7 +34,6 @@ public final class OwnershipRouter {
         }
 
         try {
-            String name = streamName(ctx);
             Owner owner = ownership.ownerOf(name);
             NodeMeta local = ownership.localNode();
 
@@ -66,10 +64,5 @@ public final class OwnershipRouter {
             ctx.header(Protocol.H_CACHE_CONTROL, "no-store");
             ctx.header("X-Error", Objects.isNull(e.getMessage()) ? "routing failed" : e.getMessage());
         }
-    }
-
-    private static String streamName(Context ctx) {
-        String path = ctx.path();
-        return Objects.isNull(path) || path.isEmpty() ? "/" : path;
     }
 }

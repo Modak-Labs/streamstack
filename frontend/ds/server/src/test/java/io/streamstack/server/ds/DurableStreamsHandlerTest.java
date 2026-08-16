@@ -1,7 +1,7 @@
 package io.streamstack.server.ds;
 
 import io.javalin.Javalin;
-import io.streamstack.model.Protocol;
+import io.streamstack.ds.model.Protocol;
 import io.streamstack.server.service.AppendService;
 import io.streamstack.server.service.OwnershipService;
 import io.streamstack.server.service.ReadService;

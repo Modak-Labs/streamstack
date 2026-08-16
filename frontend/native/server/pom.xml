@@ -66,7 +66,7 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>io.streamstack.ss.server.NativeServer</mainClass>
+                    <mainClass>io.streamstack.server.api.NativeServer</mainClass>
                 </configuration>
             </plugin>
             <plugin>
@@ -82,7 +82,7 @@
                             <outputFile>${project.build.directory}/${project.artifactId}.jar</outputFile>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>io.streamstack.ss.server.NativeServer</mainClass>
+                                    <mainClass>io.streamstack.server.api.NativeServer</mainClass>
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>

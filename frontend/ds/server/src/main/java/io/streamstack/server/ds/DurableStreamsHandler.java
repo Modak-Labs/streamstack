@@ -1,14 +1,14 @@
 package io.streamstack.server.ds;
 
 import io.javalin.http.Context;
-import io.streamstack.model.LiveMode;
-import io.streamstack.model.Offset;
-import io.streamstack.model.Protocol;
-import io.streamstack.model.request.AppendRequest;
-import io.streamstack.model.response.AppendResponse;
-import io.streamstack.model.response.CreateResponse;
-import io.streamstack.model.response.HeadResponse;
-import io.streamstack.model.response.ReadResponse;
+import io.streamstack.ds.model.LiveMode;
+import io.streamstack.ds.model.Offset;
+import io.streamstack.ds.model.Protocol;
+import io.streamstack.ds.model.request.AppendRequest;
+import io.streamstack.ds.model.response.AppendResponse;
+import io.streamstack.ds.model.response.CreateResponse;
+import io.streamstack.ds.model.response.HeadResponse;
+import io.streamstack.ds.model.response.ReadResponse;
 import io.streamstack.server.model.OffsetToken;
 import io.streamstack.server.model.StreamMeta;
 import io.streamstack.server.service.StreamService;

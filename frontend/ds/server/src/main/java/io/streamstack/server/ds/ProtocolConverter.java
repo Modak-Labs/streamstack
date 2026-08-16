@@ -2,12 +2,12 @@ package io.streamstack.server.ds;
 
 import java.util.Objects;
 
-import io.streamstack.model.Offset;
-import io.streamstack.model.request.AppendRequest;
-import io.streamstack.model.response.AppendResponse;
-import io.streamstack.model.response.CreateResponse;
-import io.streamstack.model.response.HeadResponse;
-import io.streamstack.model.response.ReadResponse;
+import io.streamstack.ds.model.Offset;
+import io.streamstack.ds.model.request.AppendRequest;
+import io.streamstack.ds.model.response.AppendResponse;
+import io.streamstack.ds.model.response.CreateResponse;
+import io.streamstack.ds.model.response.HeadResponse;
+import io.streamstack.ds.model.response.ReadResponse;
 import io.streamstack.server.model.AppendCommand;
 import io.streamstack.server.model.AppendResult;
 import io.streamstack.server.model.CreateCommand;

@@ -2,14 +2,14 @@ package io.streamstack.cli.ss;
 
 import io.streamstack.cli.Io;
 import io.streamstack.cli.Main;
-import io.streamstack.ss.client.StreamStack;
-import io.streamstack.ss.model.RecordEnvelope;
-import io.streamstack.ss.model.SequencedRecord;
-import io.streamstack.ss.model.request.AppendRequest;
-import io.streamstack.ss.model.response.AppendResponse;
-import io.streamstack.ss.model.response.HeadResponse;
-import io.streamstack.ss.model.response.ListResponse;
-import io.streamstack.ss.model.response.ReadResponse;
+import io.streamstack.client.StreamStack;
+import io.streamstack.model.RecordEnvelope;
+import io.streamstack.model.SequencedRecord;
+import io.streamstack.model.request.AppendRequest;
+import io.streamstack.model.response.AppendResponse;
+import io.streamstack.model.response.HeadResponse;
+import io.streamstack.model.response.ListResponse;
+import io.streamstack.model.response.ReadResponse;
 
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
