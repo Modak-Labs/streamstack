@@ -1,0 +1,27 @@
+[package]
+name = "pico-sql"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "PicoMQ SQL metadata sink: the durable command log in SQLite/Postgres"
+repository.workspace = true
+
+[dependencies]
+s3stream = { workspace = true }
+pico-metadata = { workspace = true }
+pico-common = { workspace = true }
+
+async-trait = { workspace = true }
+bytes = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

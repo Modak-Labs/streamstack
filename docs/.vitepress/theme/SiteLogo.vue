@@ -1,0 +1,28 @@
+<template>
+  <svg
+    class="pico-logo"
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 11 11"
+    width="32"
+    height="32"
+    role="img"
+    aria-label="PicoMQ"
+  >
+    <rect width="11" height="11" fill="#0f1620" />
+    <path
+      fill="#f6f7f9"
+      d="M1 1H10V2H2V3H10V6H2V7H10V10H1V9H9V8H1V5H9V4H1Z"
+    />
+  </svg>
+</template>
+
+<style scoped>
+.pico-logo {
+  display: block;
+  width: 32px;
+  height: 32px;
+  max-height: 32px;
+  flex: none;
+  align-self: center;
+}
+</style>

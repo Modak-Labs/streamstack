@@ -1,0 +1,36 @@
+[package]
+name = "pico-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "PicoMQ CLI: the `pico` binary"
+repository.workspace = true
+
+[[bin]]
+name = "pico"
+path = "src/main.rs"
+
+[dependencies]
+s3stream = { workspace = true }
+pico-frontend = { workspace = true }
+pico-runtime = { workspace = true }
+pico-client = { workspace = true }
+bytes = { workspace = true }
+hdrhistogram = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }
+
+clap = { workspace = true }
+# `signal` for the ctrl-c handler (PORT: Java's shutdown hook).
+tokio = { workspace = true, features = ["signal"] }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

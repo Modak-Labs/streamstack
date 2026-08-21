@@ -1,0 +1,28 @@
+[package]
+name = "pico-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "PicoMQ runtime assembly: a ServerConfig to a running node + HTTP frontend"
+repository.workspace = true
+
+[dependencies]
+s3stream = { workspace = true }
+pico-metadata = { workspace = true }
+pico-common = { workspace = true }
+pico-sql = { workspace = true }
+pico-server = { workspace = true }
+pico-frontend = { workspace = true }
+
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

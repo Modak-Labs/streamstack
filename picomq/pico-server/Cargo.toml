@@ -1,0 +1,28 @@
+[package]
+name = "pico-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "PicoMQ server: named-stream registry + stream service over the s3stream engine"
+repository.workspace = true
+
+[dependencies]
+s3stream = { workspace = true }
+pico-metadata = { workspace = true }
+pico-common = { workspace = true }
+
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pico-sql = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

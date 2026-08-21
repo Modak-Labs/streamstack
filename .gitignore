@@ -1,0 +1,36 @@
+# Rust
+**/target/
+**/*.rs.bk
+*.profraw
+*.profdata
+
+# Local node / bench state
+/data/
+/objects/
+*.db
+*.db-wal
+*.db-shm
+
+# Property-test failures
+**/proptest-regressions/
+
+# Docs (VitePress)
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

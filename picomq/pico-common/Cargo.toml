@@ -1,0 +1,11 @@
+[package]
+name = "pico-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "PicoMQ shared helpers: time and other generic utilities with no domain types"
+repository.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,113 @@
+[workspace]
+resolver = "2"
+# Two areas:
+# - s3stream/*: the decoupled, reusable stream engine (extractable to its
+#   own repo wholesale. The s3stream/ dir is self-contained: crates, specification,
+#   conformance fixtures).
+# - picomq/*: host crates (server, metadata, cli) that depend only on the
+#   `s3stream` facade crate, never on the engine internals.
+members = [
+    "s3stream/s3stream-codec",
+    "s3stream/s3stream-object",
+    "s3stream/s3stream-wal",
+    "s3stream/s3stream-core",
+    "s3stream/s3stream",
+    "picomq/pico-common",
+    "picomq/pico-metadata",
+    "picomq/pico-sql",
+    "picomq/pico-server",
+    "picomq/pico-frontend",
+    "picomq/pico-runtime",
+    "picomq/pico-client",
+    "picomq/pico-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "Apache-2.0"
+description = "A durable stream engine on object storage."
+repository = "https://github.com/picomq/picomq"
+
+[workspace.dependencies]
+s3stream-codec = { path = "s3stream/s3stream-codec" }
+s3stream-object = { path = "s3stream/s3stream-object" }
+s3stream-wal = { path = "s3stream/s3stream-wal" }
+s3stream-core = { path = "s3stream/s3stream-core" }
+s3stream = { path = "s3stream/s3stream" }
+pico-common = { path = "picomq/pico-common" }
+pico-metadata = { path = "picomq/pico-metadata" }
+pico-sql = { path = "picomq/pico-sql" }
+pico-server = { path = "picomq/pico-server" }
+pico-frontend = { path = "picomq/pico-frontend" }
+pico-runtime = { path = "picomq/pico-runtime" }
+pico-client = { path = "picomq/pico-client" }
+
+# CLI (PORT of Java `cli`: picocli -> clap; slf4j/logback -> tracing).
+clap = { version = "4", features = ["derive", "env"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP frontends (PORT of Java `frontend/*`: Javalin/Jetty -> axum/hyper).
+axum = "0.8"
+# Listener backlog: std/tokio give no way to set it.
+socket2 = "0.5"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+# Locating the user config directory per platform.
+dirs = "5"
+base64 = "0.22"
+tokio-stream = "0.1"
+# RFC3339 instants for Pico-Expires-At (PORT of Java `Instant.parse/toString`).
+humantime = "2"
+
+bytes = "1"
+# Latency percentiles for `pico bench`; Java's BenchStats reports averages only.
+hdrhistogram = "7"
+# Java's WALUtil.crc32 is java.util.zip.CRC32 = CRC-32/ISO-HDLC (proved by
+# conformance/fixtures/crc: check("123456789") = 0x4BF43926 = standard 0xCBF43926
+# masked to 31 bits). crc32fast implements ISO-HDLC.
+crc32fast = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "io-util"] }
+async-trait = "0.1"
+futures = "0.3"
+object_store = { version = "0.12", features = ["aws"] }
+md-5 = "0.10"
+hex = "0.4"
+tracing = "0.1"
+lru = "0.12"
+metrics = "0.24"
+# Persistent (structurally shared) maps: the metadata state machine's primary
+# stores — O(1) fork for snapshots/views, cheap copy-on-write mutation.
+im = "15"
+# Lock-free published metadata views (single writer, many readers).
+arc-swap = "1"
+# The metadata plane's durable command log lives in a SQL database
+# (RisingWave-style: delegate durability/ordering to SQLite or Postgres instead
+# of embedding consensus). The DB only ever sees opaque codec blobs.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "sqlite",
+    "postgres",
+] }
+
+# test/dev
+proptest = "1"
+tokio-test = "0.4"
+tempfile = "3"
+serde_json = "1"
+criterion = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# The official Durable Streams Rust client (dev-only): our DS frontend is
+# implemented from the protocol spec; e2e tests drive it through this client
+# as an independent conformance check. Git-pinned — the client crate
+# (`packages/client-rust`) is not published (the crates.io `durable-streams`
+# name carries a server binary).
+durable-streams = { git = "https://github.com/durable-streams/durable-streams", rev = "a172acc389351cb3db6deb5cd60e3dec11e7ff39" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+todo = "allow" # scaffold phase: bodies are todo!() until ported

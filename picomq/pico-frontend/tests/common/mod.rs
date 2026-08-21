@@ -1,0 +1,91 @@
+//! Loopback test harness: a `PicoNode` on `LocalSink` + memory object
+//! storage, served over a real TCP socket by `pico_frontend::serve`. The same
+//! bind path `pico serve` uses. Timeouts are shortened for tests (short long
+//! poll, 2s SSE cap).
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use pico_frontend::{serve, Protocol, RoutingMode, RunningServer, ServeOptions};
+use pico_metadata::LocalSink;
+use pico_server::{NodeConfig, PicoNode};
+use s3stream::{MemoryObjectStorage, ObjectStorageTrait};
+
+pub struct TestServer {
+    #[allow(dead_code)]
+    pub base_url: String,
+    #[allow(dead_code)]
+    pub admin_url: String,
+    #[allow(dead_code)]
+    pub node: Arc<PicoNode>,
+    #[allow(dead_code)]
+    server: RunningServer,
+}
+
+pub async fn start_node() -> Arc<PicoNode> {
+    let (sink, views) = LocalSink::new();
+    let object_storage: Arc<dyn ObjectStorageTrait> = Arc::new(MemoryObjectStorage::new(2));
+    let wal_storage: Arc<dyn ObjectStorageTrait> = Arc::new(MemoryObjectStorage::new(3));
+    let engine = s3stream::Config {
+        wal_upload_interval_ms: 200,
+        // The WAL rides `wal_storage` above. The bucket id has to match it, and
+        // a short batch window keeps append latency out of the test timings.
+        wal_config: "3@mem://wal?batchInterval=5".into(),
+        ..Default::default()
+    };
+    Arc::new(
+        PicoNode::start(
+            NodeConfig {
+                node_id: 1,
+                node_epoch: 1,
+                engine,
+                ..Default::default()
+            },
+            Arc::new(sink),
+            views,
+            object_storage,
+            wal_storage,
+        )
+        .await
+        .unwrap(),
+    )
+}
+
+async fn start(protocol: Protocol) -> TestServer {
+    let node = start_node().await;
+    let loopback = SocketAddr::from(([127, 0, 0, 1], 0));
+    let server = serve(
+        node.clone(),
+        ServeOptions {
+            protocol,
+            addr: loopback,
+            admin_addr: Some(loopback),
+            routing_mode: RoutingMode::LocalAlways,
+            long_poll_timeout: Duration::from_secs(1),
+            sse_max_duration: Duration::from_secs(2),
+            max_chunk_size: 64 * 1024,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    TestServer {
+        base_url: format!("http://{}", server.local_addr()),
+        admin_url: format!("http://{}", server.admin_addr().unwrap()),
+        node,
+        server,
+    }
+}
+
+/// A Pico-protocol server.
+#[allow(dead_code)]
+pub async fn pico_server() -> TestServer {
+    start(Protocol::Pico).await
+}
+
+/// A Durable Streams server.
+#[allow(dead_code)]
+pub async fn ds_server() -> TestServer {
+    start(Protocol::Ds).await
+}

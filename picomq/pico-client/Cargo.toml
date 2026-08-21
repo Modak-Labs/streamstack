@@ -1,0 +1,31 @@
+[package]
+name = "pico-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "PicoMQ client: the Pico protocol and Durable Streams over HTTP"
+repository.workspace = true
+
+[dependencies]
+# The record codec and header constants are the shared protocol vocabulary
+# (PORT: Java's `frontend/native/model`, a module both its client and server
+# depend on). Here that vocabulary still lives in `pico-frontend`; a client
+# shipped on its own would want it split into a model crate first.
+pico-frontend = { workspace = true }
+
+async-trait = { workspace = true }
+bytes = { workspace = true }
+reqwest = { workspace = true, features = ["rustls-tls", "stream", "http2"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
+pico-runtime = { workspace = true }
+s3stream = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

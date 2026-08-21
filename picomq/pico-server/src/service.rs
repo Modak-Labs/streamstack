@@ -1,0 +1,1359 @@
+//! Named streams over the engine, with registry state in the metadata KV.
+//!
+//! Appends submit under the per-stream gate (order fixed), then await
+//! durability outside it so pipelined requests share WAL group commits.
+//! A dropped caller cannot wedge the stream: confirm/fencing finishes in a
+//! detached completer. Post-durability tail-cache updates may interleave.
+//! `record_append` tolerates gaps.
+
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use bytes::Bytes;
+use pico_common::now_ms;
+use pico_metadata::{MetadataNodeHandle, ViewPublisher};
+use s3stream::{
+    AppendContext, CreateStreamOptions, FetchContext, KVClient, KeyValue, OpenStreamOptions,
+    PendingAppend, RecordBatch, Stream, StreamClientTrait as StreamClient,
+};
+
+use crate::error::{ErrorKind, ServiceError};
+use crate::framing;
+use crate::registry::{validate_producer, ClosedBy, ProducerDecision, RegistryEntry};
+use crate::types::{
+    AppendCommand, AppendResult, CloseResult, CreateCommand, CreateResult, OffsetToken, ReadResult,
+    StreamList, StreamMeta, StreamRecord,
+};
+use crate::waiter::StreamWaiterRegistry;
+
+const DEFAULT_LIST_LIMIT: usize = 1000;
+const MAX_LIST_LIMIT: usize = 10_000;
+const TAIL_MAX_BYTES: usize = 4 * 1024 * 1024;
+const TAIL_MAX_RECORDS: usize = 4096;
+
+/// Recent appended records kept in memory so tail reads skip the engine fetch.
+#[derive(Default)]
+pub(crate) struct TailCache {
+    recent: VecDeque<StreamRecord>,
+    recent_bytes: usize,
+}
+
+impl TailCache {
+    fn record_append(&mut self, base_offset: u64, records: &[Bytes]) {
+        if records.is_empty() {
+            return;
+        }
+        if let Some(last) = self.recent.back() {
+            let expected = last.offset.record_offset() + 1;
+            if base_offset < expected {
+                return;
+            }
+            if base_offset > expected {
+                self.recent.clear();
+                self.recent_bytes = 0;
+            }
+        }
+        for (i, bytes) in records.iter().enumerate() {
+            self.recent.push_back(StreamRecord {
+                offset: OffsetToken::of_record_offset(base_offset + i as u64),
+                payload: bytes.clone(),
+            });
+            self.recent_bytes += bytes.len();
+        }
+        while self.recent.len() > TAIL_MAX_RECORDS
+            || (self.recent_bytes > TAIL_MAX_BYTES && self.recent.len() > 1)
+        {
+            if let Some(dropped) = self.recent.pop_front() {
+                self.recent_bytes -= dropped.payload.len();
+            }
+        }
+    }
+
+    fn tail_records(&self, start: u64) -> Option<Vec<StreamRecord>> {
+        let first = self.recent.front()?.offset.record_offset();
+        let last = self.recent.back()?.offset.record_offset();
+        if start < first || start > last {
+            return None;
+        }
+        Some(
+            self.recent
+                .iter()
+                .filter(|r| r.offset.record_offset() >= start)
+                .cloned()
+                .collect(),
+        )
+    }
+
+    fn reset(&mut self) {
+        self.recent.clear();
+        self.recent_bytes = 0;
+    }
+}
+
+/// Per-name gate: the operation lock plus the tail cache it protects.
+struct Gate {
+    op: tokio::sync::Mutex<()>,
+    tail: Mutex<TailCache>,
+}
+
+pub struct S3StreamService {
+    stream_client: Arc<dyn StreamClient>,
+    kv_client: Arc<dyn KVClient>,
+    views: Arc<ViewPublisher>,
+    node: MetadataNodeHandle,
+    waiters: Arc<StreamWaiterRegistry>,
+    open_streams: Mutex<HashMap<u64, Arc<dyn Stream>>>,
+    local_epochs: Mutex<HashMap<u64, u64>>,
+    gates: Mutex<HashMap<String, Arc<Gate>>>,
+    entry_cache: Mutex<HashMap<String, RegistryEntry>>,
+    open_lock: tokio::sync::Mutex<()>,
+}
+
+impl S3StreamService {
+    pub fn new(
+        stream_client: Arc<dyn StreamClient>,
+        kv_client: Arc<dyn KVClient>,
+        views: Arc<ViewPublisher>,
+        node: MetadataNodeHandle,
+        waiters: Arc<StreamWaiterRegistry>,
+    ) -> Self {
+        Self {
+            stream_client,
+            kv_client,
+            views,
+            node,
+            waiters,
+            open_streams: Mutex::new(HashMap::new()),
+            local_epochs: Mutex::new(HashMap::new()),
+            gates: Mutex::new(HashMap::new()),
+            entry_cache: Mutex::new(HashMap::new()),
+            open_lock: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    pub fn waiters(&self) -> Arc<StreamWaiterRegistry> {
+        self.waiters.clone()
+    }
+
+    // ---- stream lifecycle ----
+
+    pub async fn create(&self, command: CreateCommand) -> Result<CreateResult, ServiceError> {
+        command.validate()?;
+        let name = normalize(&command.name);
+        let gate = self.gate_of(&name);
+        let _op = gate.op.lock().await;
+
+        if let Some(existing) = self.get_entry(&name, false).await? {
+            if !config_matches(&existing, &command) {
+                return Err(ServiceError::kind(ErrorKind::Conflict));
+            }
+            let meta = self.to_meta_live(&name, &existing).await?;
+            return Ok(CreateResult {
+                created: false,
+                meta,
+            });
+        }
+
+        let stream = self.provision_stream(&name).await?;
+        let deadline = deadline_of(command.ttl_seconds, command.expires_at_ms);
+        let candidate = RegistryEntry {
+            stream_id: stream.stream_id(),
+            content_type: command.content_type.clone(),
+            ttl_seconds: command.ttl_seconds,
+            expires_at_ms: command.expires_at_ms,
+            closed: command.closed,
+            deadline_ms: deadline,
+            last_seq: None,
+            producers: Default::default(),
+            closed_by: None,
+        };
+        let stored = self
+            .kv_client
+            .put_kv_if_absent(KeyValue {
+                key: name.clone(),
+                value: candidate.encode(),
+            })
+            .await?;
+        let mut current = RegistryEntry::decode(&stored)?;
+        self.entry_cache
+            .lock()
+            .unwrap()
+            .insert(name.clone(), current.clone());
+
+        if current.stream_id != candidate.stream_id {
+            return self
+                .resolve_lost_race(&name, stream, current, &command)
+                .await;
+        }
+
+        if self
+            .append_initial_payload(&name, &gate, &stream, &command)
+            .await?
+        {
+            current = self.require_entry(&name).await?;
+        }
+        if command.closed && !current.closed {
+            self.put_entry(&name, current.close(None)).await?;
+            current = self.require_entry(&name).await?;
+        }
+
+        let meta = to_meta_from_stream(&name, &current, stream.as_ref());
+        Ok(CreateResult {
+            created: true,
+            meta,
+        })
+    }
+
+    pub async fn head(&self, name: &str) -> Result<Option<StreamMeta>, ServiceError> {
+        let name = normalize(name);
+        match self.get_entry(&name, false).await? {
+            None => Ok(None),
+            Some(entry) => Ok(Some(self.to_meta_live(&name, &entry).await?)),
+        }
+    }
+
+    pub async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<&str>,
+        limit: usize,
+    ) -> Result<StreamList, ServiceError> {
+        let max = if limit > 0 {
+            limit.min(MAX_LIST_LIMIT)
+        } else {
+            DEFAULT_LIST_LIMIT
+        };
+        let entries = self.kv_client.list_kv(&normalize(prefix)).await?;
+        let now = now_ms();
+
+        let mut selected: Vec<(String, RegistryEntry)> = Vec::new();
+        for kv in entries {
+            if let Some(after) = start_after {
+                if !after.is_empty() && kv.key.as_str() <= after {
+                    continue;
+                }
+            }
+            let Ok(entry) = RegistryEntry::decode(&kv.value) else {
+                continue;
+            };
+            if entry.deadline_ms > 0 && now > entry.deadline_ms {
+                continue;
+            }
+            selected.push((kv.key, entry));
+            if selected.len() > max {
+                break;
+            }
+        }
+
+        let ids: Vec<u64> = selected
+            .iter()
+            .take(max)
+            .map(|(_, e)| e.stream_id)
+            .collect();
+        let committed: HashMap<u64, s3stream::StreamMetadata> = {
+            let view = self.views.load();
+            view.state
+                .get_streams(&ids)
+                .into_iter()
+                .map(|m| (m.stream_id, m))
+                .collect()
+        };
+        let has_more = selected.len() > max;
+        let streams = selected
+            .into_iter()
+            .take(max)
+            .map(|(name, entry)| {
+                let meta = committed.get(&entry.stream_id);
+                to_meta_from_committed(&name, &entry, meta)
+            })
+            .collect();
+        Ok(StreamList { streams, has_more })
+    }
+
+    pub async fn close(&self, name: &str) -> Result<CloseResult, ServiceError> {
+        let result = self
+            .append(AppendCommand {
+                name: name.to_owned(),
+                close_after: true,
+                ..Default::default()
+            })
+            .await?;
+        Ok(CloseResult {
+            next_offset: result.next_offset,
+        })
+    }
+
+    pub async fn delete(&self, name: &str) -> Result<bool, ServiceError> {
+        let name = normalize(name);
+        let gate = self.gate_of(&name);
+        let _op = gate.op.lock().await;
+
+        let Some(entry) = self.get_entry(&name, false).await? else {
+            return Ok(false);
+        };
+        let deleted = self.kv_client.del_kv(&name).await?;
+        self.entry_cache.lock().unwrap().remove(&name);
+        if deleted.is_none() {
+            return Ok(false);
+        }
+        self.destroy_stream(entry.stream_id).await;
+        gate.tail.lock().unwrap().reset();
+        self.waiters.notify_closed(&name);
+        Ok(true)
+    }
+
+    pub async fn trim(&self, name: &str, new_start_offset: u64) -> Result<u64, ServiceError> {
+        let name = normalize(name);
+        let gate = self.gate_of(&name);
+        let _op = gate.op.lock().await;
+
+        let Some(entry) = self.get_entry(&name, false).await? else {
+            return Err(ServiceError::kind(ErrorKind::NotFound));
+        };
+        let stream = self.ensure_open(entry.stream_id).await?;
+        let committed_end = {
+            let view = self.views.load();
+            view.state
+                .get_stream(entry.stream_id)
+                .map(|m| m.end_offset)
+                .unwrap_or(0)
+        };
+        let lower = live_start_offset(stream.as_ref());
+        let clamped = new_start_offset
+            .max(lower)
+            .min(stream.confirm_offset().min(committed_end));
+        if clamped > lower {
+            stream.trim(clamped).await?;
+        }
+        Ok(live_start_offset(stream.as_ref()))
+    }
+
+    // ---- append ----
+
+    /// Appends records and returns only after they are durable.
+    pub async fn append(&self, command: AppendCommand) -> Result<AppendResult, ServiceError> {
+        let command = command.normalized();
+        let name = normalize(&command.name);
+        let gate = self.gate_of(&name);
+        let _op = gate.op.lock().await;
+
+        let Some(entry) = self.get_entry(&name, false).await? else {
+            return Err(ServiceError::kind(ErrorKind::NotFound));
+        };
+        let stream = self.ensure_open(entry.stream_id).await?;
+        let mut next = OffsetToken::of_record_offset(stream.next_offset());
+
+        let decision = command
+            .producer
+            .as_ref()
+            .map(|p| validate_producer(&entry, p));
+        if let Some(decision) = decision {
+            if !matches!(decision, ProducerDecision::Accepted { .. }) {
+                return self.handle_producer_reject(&entry, next, decision, &command);
+            }
+        }
+        if entry.closed {
+            return append_to_closed(&entry, &command, next);
+        }
+        if let Some(match_seq) = command.match_seq {
+            if match_seq != next.record_offset() {
+                return Err(ServiceError::with_message(
+                    ErrorKind::MatchFailed,
+                    Some(next),
+                    false,
+                    format!(
+                        "match failed: expected tail {match_seq}, actual {}",
+                        next.record_offset()
+                    ),
+                ));
+            }
+        }
+
+        let close_only = command.payload_len() == 0 && command.close_after;
+        validate_payload(&entry, &command, decision, next, close_only)?;
+
+        let base_offset = next.record_offset();
+        let messages: Vec<Bytes> = if close_only {
+            Vec::new()
+        } else {
+            expand_payloads(&entry.content_type, &command.payloads)?
+        };
+
+        let pendings = match self.submit_messages(&stream, &messages, command.atomic) {
+            Ok(pendings) => pendings,
+            Err(e) => {
+                self.open_streams.lock().unwrap().remove(&entry.stream_id);
+                gate.tail.lock().unwrap().reset();
+                return Err(ServiceError::durability(e));
+            }
+        };
+        if !messages.is_empty() {
+            next = OffsetToken::of_record_offset(stream.next_offset());
+        }
+
+        let updated = apply_append_state(entry.clone(), &command, decision);
+        let echoed_seq = command.producer.as_ref().map(|p| p.seq);
+        let echoed_epoch = command.producer.as_ref().map(|p| p.epoch);
+        let result = AppendResult {
+            next_offset: next,
+            applied: !close_only,
+            closed: command.close_after,
+            producer_epoch: echoed_epoch,
+            producer_seq: echoed_seq,
+        };
+        let notify_offset = next.record_offset();
+
+        if command.close_after {
+            // Rare path: durability must precede the registry close marker, so
+            // this stays under the gate.
+            if let Err(e) = await_durable(pendings).await {
+                self.open_streams.lock().unwrap().remove(&entry.stream_id);
+                gate.tail.lock().unwrap().reset();
+                return Err(ServiceError::durability(e));
+            }
+            if !close_only {
+                gate.tail
+                    .lock()
+                    .unwrap()
+                    .record_append(base_offset, &messages);
+                self.waiters.notify_append(&name, notify_offset);
+            }
+            self.close_entry(&name, updated, &command).await?;
+            return Ok(result);
+        }
+
+        // Apply this producer/registry update at submit time, before
+        // durability.
+        let touched = touch_deadline(updated);
+        if touched != entry {
+            self.put_entry(&name, touched).await?;
+        }
+
+        // Drop the gate before awaiting durability. That pipelining lets
+        // queued requests on the same stream share WAL group commits.
+        drop(_op);
+        if let Err(e) = await_durable(pendings).await {
+            self.open_streams.lock().unwrap().remove(&entry.stream_id);
+            gate.tail.lock().unwrap().reset();
+            return Err(ServiceError::durability(e));
+        }
+
+        // Post-durability bookkeeping runs without the gate, so two pipelined
+        // requests may reach here out of submit order.`record_append`
+        // tolerates the resulting gap (it restarts the window) and waiter
+        // notification is monotonic in the offset it publishes.
+        gate.tail
+            .lock()
+            .unwrap()
+            .record_append(base_offset, &messages);
+        self.waiters.notify_append(&name, notify_offset);
+        Ok(result)
+    }
+
+    // ---- read ----
+
+    pub async fn read(
+        &self,
+        name: &str,
+        from: OffsetToken,
+        max_bytes: usize,
+        max_records: usize,
+    ) -> Result<ReadResult, ServiceError> {
+        let name = normalize(name);
+        let gate = self.gate_of(&name);
+        let _op = gate.op.lock().await;
+
+        let Some(entry) = self.get_entry(&name, true).await? else {
+            return Err(ServiceError::kind(ErrorKind::NotFound));
+        };
+        let stream = self.ensure_open(entry.stream_id).await?;
+        let start = from.record_offset();
+        let end = stream.confirm_offset();
+        if start > end {
+            return Err(ServiceError::kind(ErrorKind::BadRequest));
+        }
+        if start == end {
+            return Ok(ReadResult {
+                records: Vec::new(),
+                content_type: entry.content_type,
+                next_offset: OffsetToken::of_record_offset(end),
+                up_to_date: true,
+                closed: entry.closed,
+            });
+        }
+        let max_bytes = if max_bytes > 0 { max_bytes } else { usize::MAX };
+        let max_records = if max_records > 0 {
+            max_records
+        } else {
+            usize::MAX
+        };
+
+        let cached = gate.tail.lock().unwrap().tail_records(start);
+        if let Some(cached) = cached {
+            return Ok(tail_read(&entry, &cached, end, max_bytes, max_records));
+        }
+        self.fetch_records(&entry, stream.as_ref(), start, end, max_bytes, max_records)
+            .await
+    }
+
+    /// Park until data past `from` is durable, the stream closes, or `timeout`
+    /// lapses.
+    ///
+    /// (named `wait_appended`, `await` is a Rust
+    /// fn already is one.
+    pub async fn wait_appended(
+        &self,
+        name: &str,
+        from: OffsetToken,
+        timeout: Duration,
+    ) -> Result<bool, ServiceError> {
+        let name = normalize(name);
+        let Some(entry) = self.get_entry(&name, false).await? else {
+            return Ok(false);
+        };
+        if entry.closed {
+            return Ok(true);
+        }
+        let stream = self.ensure_open(entry.stream_id).await?;
+        if stream.confirm_offset() > from.record_offset() {
+            return Ok(true);
+        }
+        Ok(self.waiters.wait(&name, from, timeout).await)
+    }
+
+    // -----------------------------------------------------------------
+    // Host surface
+    // -----------------------------------------------------------------
+
+    pub async fn lookup_stream_id(&self, name: &str) -> Result<Option<u64>, ServiceError> {
+        Ok(self
+            .get_entry(&normalize(name), false)
+            .await?
+            .map(|e| e.stream_id))
+    }
+
+    pub fn open_stream_snapshot(&self) -> Vec<Arc<dyn Stream>> {
+        self.open_streams
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    pub async fn shutdown(&self) {
+        self.waiters.clear();
+        let streams = self.open_stream_snapshot();
+        for stream in streams {
+            let _ = stream.close().await;
+        }
+        self.open_streams.lock().unwrap().clear();
+    }
+
+    // -----------------------------------------------------------------
+    // Internals
+    // -----------------------------------------------------------------
+
+    fn gate_of(&self, name: &str) -> Arc<Gate> {
+        self.gates
+            .lock()
+            .unwrap()
+            .entry(name.to_owned())
+            .or_insert_with(|| {
+                Arc::new(Gate {
+                    op: tokio::sync::Mutex::new(()),
+                    tail: Mutex::new(TailCache::default()),
+                })
+            })
+            .clone()
+    }
+
+    async fn provision_stream(&self, name: &str) -> Result<Arc<dyn Stream>, ServiceError> {
+        let stream = self
+            .stream_client
+            .create_and_open_stream(CreateStreamOptions {
+                epoch: 1,
+                tags: HashMap::from([("path".to_owned(), name.to_owned())]),
+            })
+            .await?;
+        self.open_streams
+            .lock()
+            .unwrap()
+            .insert(stream.stream_id(), stream.clone());
+        self.local_epochs
+            .lock()
+            .unwrap()
+            .insert(stream.stream_id(), stream.stream_epoch());
+        Ok(stream)
+    }
+
+    async fn resolve_lost_race(
+        &self,
+        name: &str,
+        stream: Arc<dyn Stream>,
+        current: RegistryEntry,
+        command: &CreateCommand,
+    ) -> Result<CreateResult, ServiceError> {
+        let _ = stream.destroy().await;
+        self.open_streams
+            .lock()
+            .unwrap()
+            .remove(&stream.stream_id());
+        self.local_epochs
+            .lock()
+            .unwrap()
+            .remove(&stream.stream_id());
+        if !config_matches(&current, command) {
+            return Err(ServiceError::kind(ErrorKind::Conflict));
+        }
+        let meta = self.to_meta_live(name, &current).await?;
+        Ok(CreateResult {
+            created: false,
+            meta,
+        })
+    }
+
+    async fn append_initial_payload(
+        &self,
+        name: &str,
+        gate: &Gate,
+        stream: &Arc<dyn Stream>,
+        command: &CreateCommand,
+    ) -> Result<bool, ServiceError> {
+        if command.initial_payload.is_empty() {
+            return Ok(false);
+        }
+        let messages = split_messages(&command.content_type, &command.initial_payload, true)?;
+        if messages.is_empty() {
+            return Ok(false);
+        }
+        let base_offset = stream.next_offset();
+        let pendings = self
+            .submit_messages(stream, &messages, false)
+            .map_err(ServiceError::durability)?;
+        await_durable(pendings)
+            .await
+            .map_err(ServiceError::durability)?;
+        gate.tail
+            .lock()
+            .unwrap()
+            .record_append(base_offset, &messages);
+        self.waiters.notify_append(name, stream.next_offset());
+        Ok(true)
+    }
+
+    fn submit_messages(
+        &self,
+        stream: &Arc<dyn Stream>,
+        messages: &[Bytes],
+        atomic: bool,
+    ) -> Result<Vec<PendingAppend>, s3stream::Error> {
+        if messages.is_empty() {
+            return Ok(Vec::new());
+        }
+        if atomic && messages.len() > 1 {
+            let framed = framing::encode_frames(messages);
+            let pending = Arc::clone(stream).submit_append(
+                AppendContext::default(),
+                RecordBatch::new(messages.len() as u32, now_ms(), framed),
+            )?;
+            return Ok(vec![pending]);
+        }
+        messages
+            .iter()
+            .map(|message| {
+                Arc::clone(stream).submit_append(
+                    AppendContext::default(),
+                    RecordBatch::new(1, now_ms(), message.clone()),
+                )
+            })
+            .collect()
+    }
+
+    fn handle_producer_reject(
+        &self,
+        entry: &RegistryEntry,
+        next: OffsetToken,
+        decision: ProducerDecision,
+        command: &AppendCommand,
+    ) -> Result<AppendResult, ServiceError> {
+        match decision {
+            ProducerDecision::Duplicate { last_seq } => Ok(AppendResult {
+                next_offset: next,
+                applied: false,
+                closed: entry.closed,
+                producer_epoch: command.producer.as_ref().map(|p| p.epoch),
+                producer_seq: Some(last_seq),
+            }),
+            ProducerDecision::StaleEpoch { current_epoch } => {
+                Err(ServiceError::fenced(current_epoch))
+            }
+            ProducerDecision::InvalidEpochSeq => Err(ServiceError::with_message(
+                ErrorKind::BadRequest,
+                Some(next),
+                false,
+                "New epoch must start with sequence 0",
+            )),
+            ProducerDecision::SequenceGap { expected, received } => {
+                Err(ServiceError::sequence_gap(expected, received))
+            }
+            ProducerDecision::Accepted { .. } => Err(ServiceError::kind(ErrorKind::BadRequest)),
+        }
+    }
+
+    async fn close_entry(
+        &self,
+        name: &str,
+        entry: RegistryEntry,
+        command: &AppendCommand,
+    ) -> Result<(), ServiceError> {
+        let closed_by = command.producer.as_ref().map(|p| ClosedBy {
+            producer_id: p.producer_id.clone(),
+            epoch: p.epoch,
+            seq: p.seq,
+        });
+        self.put_entry(name, touch_deadline(entry.close(closed_by)))
+            .await?;
+        self.waiters.notify_closed(name);
+        Ok(())
+    }
+
+    async fn fetch_records(
+        &self,
+        entry: &RegistryEntry,
+        stream: &dyn Stream,
+        start: u64,
+        end: u64,
+        max_bytes: usize,
+        max_records: usize,
+    ) -> Result<ReadResult, ServiceError> {
+        let fetch = stream
+            .fetch(FetchContext::default(), start, end, max_bytes)
+            .await?;
+        let mut records: Vec<StreamRecord> = Vec::new();
+        let mut total = 0usize;
+        let mut next = start;
+
+        'outer: for batch in &fetch.records {
+            if batch.count > 1 {
+                let frames = framing::decode_frames(&batch.payload, batch.count)?;
+                for (i, frame) in frames.into_iter().enumerate() {
+                    let offset = batch.base_offset + i as u64;
+                    if offset < start {
+                        continue;
+                    }
+                    if total + frame.len() > max_bytes && total > 0 {
+                        break 'outer;
+                    }
+                    total += frame.len();
+                    next = offset + 1;
+                    records.push(StreamRecord {
+                        offset: OffsetToken::of_record_offset(offset),
+                        payload: frame,
+                    });
+                    if total >= max_bytes || records.len() >= max_records {
+                        break 'outer;
+                    }
+                }
+                continue;
+            }
+
+            let bytes = batch.payload.clone();
+            if total + bytes.len() > max_bytes && total > 0 {
+                break;
+            }
+            total += bytes.len();
+            next = batch.last_offset;
+            records.push(StreamRecord {
+                offset: OffsetToken::of_record_offset(batch.base_offset),
+                payload: bytes,
+            });
+            if total >= max_bytes || records.len() >= max_records {
+                break;
+            }
+        }
+
+        Ok(ReadResult {
+            records,
+            content_type: entry.content_type.clone(),
+            next_offset: OffsetToken::of_record_offset(next),
+            up_to_date: next >= end,
+            closed: entry.closed,
+        })
+    }
+
+    async fn ensure_open(&self, stream_id: u64) -> Result<Arc<dyn Stream>, ServiceError> {
+        if let Some(existing) = self.open_streams.lock().unwrap().get(&stream_id) {
+            return Ok(existing.clone());
+        }
+        let _open = self.open_lock.lock().await;
+        if let Some(existing) = self.open_streams.lock().unwrap().get(&stream_id) {
+            return Ok(existing.clone());
+        }
+        let epoch = self.next_epoch(stream_id);
+        let opened = self
+            .stream_client
+            .open_stream(
+                stream_id,
+                OpenStreamOptions {
+                    epoch,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        self.open_streams
+            .lock()
+            .unwrap()
+            .insert(stream_id, opened.clone());
+        self.local_epochs
+            .lock()
+            .unwrap()
+            .insert(stream_id, opened.stream_epoch());
+        Ok(opened)
+    }
+
+    fn next_epoch(&self, stream_id: u64) -> u64 {
+        let mut epochs = self.local_epochs.lock().unwrap();
+        if let Some(epoch) = epochs.get_mut(&stream_id) {
+            *epoch += 1;
+            return *epoch;
+        }
+        let current = {
+            let view = self.views.load();
+            view.state
+                .get_stream(stream_id)
+                .map(|m| m.epoch)
+                .unwrap_or(0)
+        };
+        let next = current + 1;
+        epochs.insert(stream_id, next);
+        next
+    }
+
+    async fn get_entry(
+        &self,
+        name: &str,
+        touch: bool,
+    ) -> Result<Option<RegistryEntry>, ServiceError> {
+        let cached = self.entry_cache.lock().unwrap().get(name).cloned();
+        let entry = match cached {
+            Some(entry) => entry,
+            None => {
+                let Some(value) = self.kv_client.get_kv(name).await? else {
+                    return Ok(None);
+                };
+                let entry = RegistryEntry::decode(&value)?;
+                self.entry_cache
+                    .lock()
+                    .unwrap()
+                    .insert(name.to_owned(), entry.clone());
+                entry
+            }
+        };
+        if entry.deadline_ms > 0 && now_ms() > entry.deadline_ms {
+            self.expire(name, &entry).await;
+            return Ok(None);
+        }
+        if touch {
+            let refreshed = touch_deadline(entry.clone());
+            if refreshed != entry {
+                self.put_entry(name, refreshed.clone()).await?;
+                return Ok(Some(refreshed));
+            }
+        }
+        Ok(Some(entry))
+    }
+
+    /// TTL lapsed: drop the KV entry, destroy the stream,
+    /// reset the tail, wake waiters.
+    async fn expire(&self, name: &str, entry: &RegistryEntry) {
+        let _ = self.kv_client.del_kv(name).await;
+        self.entry_cache.lock().unwrap().remove(name);
+        self.destroy_stream(entry.stream_id).await;
+        if let Some(gate) = self.gates.lock().unwrap().get(name) {
+            gate.tail.lock().unwrap().reset();
+        }
+        self.waiters.notify_closed(name);
+    }
+
+    async fn destroy_stream(&self, stream_id: u64) {
+        let held = self.open_streams.lock().unwrap().remove(&stream_id);
+        self.local_epochs.lock().unwrap().remove(&stream_id);
+        let stream = match held {
+            Some(stream) => stream,
+            None => {
+                let epoch = self.next_epoch(stream_id);
+                match self
+                    .stream_client
+                    .open_stream(
+                        stream_id,
+                        OpenStreamOptions {
+                            epoch,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                {
+                    Ok(stream) => stream,
+                    Err(_) => return,
+                }
+            }
+        };
+        let _ = stream.destroy().await;
+        self.local_epochs.lock().unwrap().remove(&stream_id);
+    }
+
+    async fn require_entry(&self, name: &str) -> Result<RegistryEntry, ServiceError> {
+        self.get_entry(name, false).await?.ok_or_else(|| {
+            ServiceError::with_message(
+                ErrorKind::BadRequest,
+                None,
+                false,
+                format!("missing registry entry for {name}"),
+            )
+        })
+    }
+
+    async fn put_entry(&self, name: &str, entry: RegistryEntry) -> Result<(), ServiceError> {
+        self.kv_client
+            .put_kv(KeyValue {
+                key: name.to_owned(),
+                value: entry.encode(),
+            })
+            .await?;
+        self.entry_cache
+            .lock()
+            .unwrap()
+            .insert(name.to_owned(), entry);
+        Ok(())
+    }
+
+    async fn to_meta_live(
+        &self,
+        name: &str,
+        entry: &RegistryEntry,
+    ) -> Result<StreamMeta, ServiceError> {
+        let stream = self.ensure_open(entry.stream_id).await?;
+        Ok(to_meta_from_stream(name, entry, stream.as_ref()))
+    }
+
+    /// The metadata node identity this service runs as.
+    pub fn node(&self) -> &MetadataNodeHandle {
+        &self.node
+    }
+}
+
+// ---- helpers ----
+
+pub(crate) fn normalize(name: &str) -> String {
+    if name.is_empty() {
+        "/".to_owned()
+    } else {
+        name.to_owned()
+    }
+}
+
+fn config_matches(entry: &RegistryEntry, command: &CreateCommand) -> bool {
+    framing::mime_equals(Some(&entry.content_type), Some(&command.content_type))
+        && entry.ttl_seconds == command.ttl_seconds
+        && entry.expires_at_ms == command.expires_at_ms
+        && entry.closed == command.closed
+}
+
+fn deadline_of(ttl_seconds: Option<u64>, expires_at_ms: Option<i64>) -> i64 {
+    if let Some(expires) = expires_at_ms {
+        return expires;
+    }
+    if let Some(ttl) = ttl_seconds {
+        return now_ms() + ttl as i64 * 1000;
+    }
+    0
+}
+
+fn touch_deadline(entry: RegistryEntry) -> RegistryEntry {
+    let Some(ttl) = entry.ttl_seconds else {
+        return entry;
+    };
+    if entry.expires_at_ms.is_some() {
+        return entry;
+    }
+    let next = now_ms() + ttl as i64 * 1000;
+    let coarsen = (ttl as i64 * 100).max(1000);
+    if entry.deadline_ms > 0 && next - entry.deadline_ms < coarsen {
+        return entry;
+    }
+    entry.with_deadline(next)
+}
+
+fn validate_payload(
+    entry: &RegistryEntry,
+    command: &AppendCommand,
+    decision: Option<ProducerDecision>,
+    next: OffsetToken,
+    close_only: bool,
+) -> Result<(), ServiceError> {
+    if !close_only {
+        let ct = command.content_type.as_deref().unwrap_or("");
+        if ct.is_empty() {
+            return Err(ServiceError::with_message(
+                ErrorKind::BadRequest,
+                Some(next),
+                false,
+                "missing Content-Type",
+            ));
+        }
+        if !framing::mime_equals(Some(&entry.content_type), Some(ct)) {
+            return Err(ServiceError::at(ErrorKind::Conflict, next, false));
+        }
+        if command.payload_len() == 0 {
+            return Err(ServiceError::with_message(
+                ErrorKind::BadRequest,
+                Some(next),
+                false,
+                "Empty body",
+            ));
+        }
+    }
+    if let Some(stream_seq) = &command.stream_seq {
+        let accepted =
+            decision.is_none() || matches!(decision, Some(ProducerDecision::Accepted { .. }));
+        if accepted {
+            if let Some(last_seq) = &entry.last_seq {
+                if stream_seq.as_str() <= last_seq.as_str() {
+                    return Err(ServiceError::with_message(
+                        ErrorKind::Conflict,
+                        Some(next),
+                        false,
+                        "Sequence conflict",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn append_to_closed(
+    entry: &RegistryEntry,
+    command: &AppendCommand,
+    next: OffsetToken,
+) -> Result<AppendResult, ServiceError> {
+    let has_producer = command.producer.is_some();
+    if command.close_after && command.payload_len() == 0 {
+        if has_producer && !matches_closed_by(entry, command) && entry.closed_by.is_some() {
+            return Err(ServiceError::at(ErrorKind::Closed, next, true));
+        }
+        let echoed_seq = if has_producer {
+            Some(
+                entry
+                    .closed_by
+                    .as_ref()
+                    .map(|c| c.seq)
+                    .unwrap_or_else(|| command.producer.as_ref().unwrap().seq),
+            )
+        } else {
+            None
+        };
+        let echoed_epoch = command.producer.as_ref().map(|p| p.epoch);
+        return Ok(AppendResult {
+            next_offset: next,
+            applied: false,
+            closed: true,
+            producer_epoch: echoed_epoch,
+            producer_seq: echoed_seq,
+        });
+    }
+    if has_producer && matches_closed_by(entry, command) {
+        return Ok(AppendResult {
+            next_offset: next,
+            applied: false,
+            closed: true,
+            producer_epoch: command.producer.as_ref().map(|p| p.epoch),
+            producer_seq: entry.closed_by.as_ref().map(|c| c.seq),
+        });
+    }
+    Err(ServiceError::at(ErrorKind::Closed, next, true))
+}
+
+fn matches_closed_by(entry: &RegistryEntry, command: &AppendCommand) -> bool {
+    match (&entry.closed_by, &command.producer) {
+        (Some(closed_by), Some(producer)) => {
+            closed_by.producer_id == producer.producer_id
+                && closed_by.epoch == producer.epoch
+                && closed_by.seq == producer.seq
+        }
+        _ => false,
+    }
+}
+
+fn apply_append_state(
+    entry: RegistryEntry,
+    command: &AppendCommand,
+    decision: Option<ProducerDecision>,
+) -> RegistryEntry {
+    let mut updated = entry;
+    if let Some(seq) = &command.stream_seq {
+        updated = updated.with_last_seq(seq.clone());
+    }
+    if let (Some(ProducerDecision::Accepted { .. }), Some(producer)) = (decision, &command.producer)
+    {
+        updated = updated.with_producer(producer.producer_id.clone(), producer.epoch, producer.seq);
+    }
+    updated
+}
+
+/// JSON bodies split into one record per element.
+fn expand_payloads(content_type: &str, payloads: &[Bytes]) -> Result<Vec<Bytes>, ServiceError> {
+    if payloads.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for payload in payloads {
+        out.extend(split_messages(content_type, payload, false)?);
+    }
+    Ok(out)
+}
+
+fn split_messages(
+    content_type: &str,
+    body: &Bytes,
+    create: bool,
+) -> Result<Vec<Bytes>, ServiceError> {
+    if !framing::is_json(&framing::mime_of(Some(content_type))) {
+        return Ok(vec![body.clone()]);
+    }
+    let node: serde_json::Value = serde_json::from_slice(body).map_err(|_| {
+        ServiceError::with_message(ErrorKind::BadRequest, None, false, "invalid JSON")
+    })?;
+    match node {
+        serde_json::Value::Array(items) => {
+            if items.is_empty() {
+                if create {
+                    return Ok(Vec::new());
+                }
+                return Err(ServiceError::with_message(
+                    ErrorKind::BadRequest,
+                    None,
+                    false,
+                    "empty JSON array not allowed",
+                ));
+            }
+            items
+                .into_iter()
+                .map(|item| {
+                    serde_json::to_vec(&item).map(Bytes::from).map_err(|_| {
+                        ServiceError::with_message(
+                            ErrorKind::BadRequest,
+                            None,
+                            false,
+                            "invalid JSON",
+                        )
+                    })
+                })
+                .collect()
+        }
+        other => Ok(vec![Bytes::from(serde_json::to_vec(&other).map_err(
+            |_| ServiceError::with_message(ErrorKind::BadRequest, None, false, "invalid JSON"),
+        )?)]),
+    }
+}
+
+fn tail_read(
+    entry: &RegistryEntry,
+    cached: &[StreamRecord],
+    end: u64,
+    max_bytes: usize,
+    max_records: usize,
+) -> ReadResult {
+    let mut records = Vec::new();
+    let mut total = 0usize;
+    let mut next = cached
+        .first()
+        .map(|r| r.offset.record_offset())
+        .unwrap_or(end);
+    for record in cached {
+        if record.offset.record_offset() >= end {
+            break;
+        }
+        let len = record.payload.len();
+        if total + len > max_bytes && total > 0 {
+            break;
+        }
+        records.push(record.clone());
+        total += len;
+        next = record.offset.record_offset() + 1;
+        if total >= max_bytes || records.len() >= max_records {
+            break;
+        }
+    }
+    ReadResult {
+        records,
+        content_type: entry.content_type.clone(),
+        next_offset: OffsetToken::of_record_offset(next),
+        up_to_date: next >= end,
+        closed: entry.closed,
+    }
+}
+
+/// `-1` sentinel as `u64::MAX` (snapshot-read fake opens).
+fn live_start_offset(stream: &dyn Stream) -> u64 {
+    let start = stream.start_offset();
+    if start == u64::MAX {
+        0
+    } else {
+        start
+    }
+}
+
+fn to_meta_from_stream(name: &str, entry: &RegistryEntry, stream: &dyn Stream) -> StreamMeta {
+    to_meta(
+        name,
+        entry,
+        live_start_offset(stream),
+        stream.confirm_offset(),
+        stream.next_offset(),
+    )
+}
+
+fn to_meta_from_committed(
+    name: &str,
+    entry: &RegistryEntry,
+    committed: Option<&s3stream::StreamMetadata>,
+) -> StreamMeta {
+    let (start, end) = committed
+        .map(|m| {
+            let start = if m.start_offset == u64::MAX {
+                0
+            } else {
+                m.start_offset
+            };
+            let end = if m.end_offset == u64::MAX {
+                0
+            } else {
+                m.end_offset
+            };
+            (start, end)
+        })
+        .unwrap_or((0, 0));
+    to_meta(name, entry, start, end, end)
+}
+
+fn to_meta(name: &str, entry: &RegistryEntry, start: u64, next: u64, submitted: u64) -> StreamMeta {
+    StreamMeta {
+        name: name.to_owned(),
+        stream_id: entry.stream_id,
+        content_type: entry.content_type.clone(),
+        ttl_seconds: entry.ttl_seconds,
+        expires_at_ms: entry.expires_at_ms,
+        start_offset: OffsetToken::of_record_offset(start),
+        next_offset: OffsetToken::of_record_offset(next),
+        submitted_offset: OffsetToken::of_record_offset(submitted),
+        closed: entry.closed,
+    }
+}
+
+/// Await durability of submitted appends, in submit order.
+///
+/// Each request awaits its own pendings. WAL confirm order makes them
+/// resolve in submit order anyway, and all were already in flight together.
+async fn await_durable(pendings: Vec<PendingAppend>) -> Result<(), s3stream::Error> {
+    for pending in pendings {
+        pending.durable().await?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rec(offset: u64, payload: &[u8]) -> StreamRecord {
+        StreamRecord {
+            offset: OffsetToken::of_record_offset(offset),
+            payload: Bytes::copy_from_slice(payload),
+        }
+    }
+
+    #[test]
+    fn tail_cache_contiguity_and_eviction() {
+        let mut tail = TailCache::default();
+        tail.record_append(0, &[Bytes::from_static(b"a"), Bytes::from_static(b"b")]);
+        assert_eq!(tail.tail_records(1).unwrap(), vec![rec(1, b"b")],);
+        // Older-than-tail ignored.
+        tail.record_append(0, &[Bytes::from_static(b"x")]);
+        assert_eq!(tail.tail_records(0).unwrap().len(), 2);
+        // Gap restarts the window.
+        tail.record_append(10, &[Bytes::from_static(b"j")]);
+        assert!(tail.tail_records(0).is_none());
+        assert_eq!(tail.tail_records(10).unwrap(), vec![rec(10, b"j")]);
+        // Record-count cap.
+        let batch: Vec<Bytes> = (0..TAIL_MAX_RECORDS + 10)
+            .map(|_| Bytes::from_static(b"r"))
+            .collect();
+        tail.record_append(11, &batch);
+        assert!(tail.recent.len() <= TAIL_MAX_RECORDS);
+    }
+
+    #[test]
+    fn split_messages_json_semantics() {
+        let split = split_messages(
+            "application/json",
+            &Bytes::from_static(br#"[{"a":1}, 2, "x"]"#),
+            false,
+        )
+        .unwrap();
+        assert_eq!(split.len(), 3);
+        assert_eq!(&split[0][..], br#"{"a":1}"#);
+        assert_eq!(&split[1][..], b"2");
+
+        // Non-array: one compacted record.
+        let one = split_messages(
+            "application/json",
+            &Bytes::from_static(br#" {"b": 2} "#),
+            false,
+        )
+        .unwrap();
+        assert_eq!(one, vec![Bytes::from_static(br#"{"b":2}"#)]);
+
+        // Empty array: legal at create only.
+        assert!(
+            split_messages("application/json", &Bytes::from_static(b"[]"), true)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(split_messages("application/json", &Bytes::from_static(b"[]"), false).is_err());
+        assert!(split_messages("application/json", &Bytes::from_static(b"{oops"), false).is_err());
+
+        // Non-JSON passes through untouched.
+        let raw = split_messages("text/plain", &Bytes::from_static(b"[1,2]"), false).unwrap();
+        assert_eq!(raw, vec![Bytes::from_static(b"[1,2]")]);
+    }
+
+    #[test]
+    fn touch_deadline_coarsens() {
+        let entry = RegistryEntry {
+            stream_id: 1,
+            content_type: "text/plain".into(),
+            ttl_seconds: Some(60),
+            expires_at_ms: None,
+            closed: false,
+            deadline_ms: 0,
+            last_seq: None,
+            producers: Default::default(),
+            closed_by: None,
+        };
+        let touched = touch_deadline(entry.clone());
+        assert!(touched.deadline_ms > 0);
+        // Touching again immediately is within the coarsening window: no-op.
+        let again = touch_deadline(touched.clone());
+        assert_eq!(again.deadline_ms, touched.deadline_ms);
+        let fixed = RegistryEntry {
+            ttl_seconds: None,
+            expires_at_ms: Some(123),
+            deadline_ms: 123,
+            ..entry
+        };
+        assert_eq!(touch_deadline(fixed.clone()), fixed);
+    }
+}
