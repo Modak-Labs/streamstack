@@ -666,11 +666,7 @@ impl StorageInner {
     }
 
     /// A hard WAL error, not backpressure. Report and fail the append.
-    fn fail_request(
-        self: &Arc<Self>,
-        ack: oneshot::Sender<Result<(), StreamError>>,
-        e: WalError,
-    ) {
+    fn fail_request(self: &Arc<Self>, ack: oneshot::Sender<Result<(), StreamError>>, e: WalError) {
         tracing::error!(error = %e, "append WAL fail");
         let error = StreamError::from(e);
         let inner = Arc::clone(self);
@@ -1184,8 +1180,10 @@ mod tests {
         // calling thread so offsets are deterministic.
         let pending: Vec<_> = (0..100u64)
             .map(|i| {
-                h.storage
-                    .submit(AppendContext::default(), record(stream, i, 1, &[i as u8; 2048]))
+                h.storage.submit(
+                    AppendContext::default(),
+                    record(stream, i, 1, &[i as u8; 2048]),
+                )
             })
             .collect();
         for (i, result) in futures::future::join_all(pending)

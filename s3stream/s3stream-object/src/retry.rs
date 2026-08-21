@@ -180,11 +180,7 @@ impl ObjectStorage for RetryingObjectStorage {
         start: u64,
         end: Option<u64>,
     ) -> Result<Bytes, ObjectError> {
-        let _permit = self
-            .read_permits
-            .acquire()
-            .await
-            .expect("semaphore closed");
+        let _permit = self.read_permits.acquire().await.expect("semaphore closed");
         retry_until_definitive(&self.config, "range_read", key, None, || {
             self.inner.range_read(options, key, start, end)
         })
@@ -234,11 +230,7 @@ impl ObjectStorage for RetryingObjectStorage {
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<ObjectInfo>, ObjectError> {
-        let _permit = self
-            .read_permits
-            .acquire()
-            .await
-            .expect("semaphore closed");
+        let _permit = self.read_permits.acquire().await.expect("semaphore closed");
         retry_until_definitive(&self.config, "list", prefix, None, || {
             self.inner.list(prefix)
         })
