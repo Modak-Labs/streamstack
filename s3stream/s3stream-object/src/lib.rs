@@ -14,6 +14,7 @@ pub mod index;
 pub mod memory;
 pub mod metadata;
 pub mod reader;
+pub mod retry;
 pub mod storage;
 pub mod writer;
 
@@ -25,6 +26,7 @@ pub use metadata::{
     S3ObjectType, StreamOffsetRange, NOOP_OBJECT_ID, NOOP_OFFSET,
 };
 pub use reader::{decode_data_block, ObjectReader};
+pub use retry::{RetryConfig, RetryingObjectStorage};
 pub use storage::{
     IdUri, MultipartWriter, ObjectInfo, ObjectPath, ObjectStorage, ObjectStoreAdapter, ReadOptions,
     ThrottleStrategy, WriteOptions, WriteResult,

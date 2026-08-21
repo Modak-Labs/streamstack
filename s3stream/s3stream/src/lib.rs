@@ -14,7 +14,7 @@ use s3stream_core::storage::s3_storage::{LogStorageFailureHandler, S3Storage, S3
 use s3stream_core::stream_client::{S3StreamClient, StreamClientConfig};
 use s3stream_core::throttle::build_network_limiters;
 use s3stream_core::{Storage, StreamClient, ThrottledObjectStorage};
-use s3stream_object::ObjectStorage;
+use s3stream_object::{ObjectStorage, RetryingObjectStorage};
 use s3stream_wal::WriteAheadLog;
 
 pub use config::{Config, NetworkBandwidthMode};
@@ -228,20 +228,22 @@ impl S3StreamBuilder {
             None
         };
         // Inject the same inbound/outbound limiters into every object storage
-        // built here.
-        let throttled = |storage: Arc<dyn ObjectStorage>| -> Arc<dyn ObjectStorage> {
-            match &limiters {
+        // built here. Retry wraps outermost so each retry attempt debits
+        // bandwidth.
+        let resilient = |storage: Arc<dyn ObjectStorage>| -> Arc<dyn ObjectStorage> {
+            let storage: Arc<dyn ObjectStorage> = match &limiters {
                 Some((inbound, outbound)) => Arc::new(ThrottledObjectStorage::new(
                     storage,
                     Some(Arc::clone(inbound)),
                     Some(Arc::clone(outbound)),
                 )),
                 None => storage,
-            }
+            };
+            Arc::new(RetryingObjectStorage::new(storage))
         };
 
         // Data object storage: explicit override, else the first data bucket URI.
-        let object_storage: Arc<dyn ObjectStorage> = throttled(match self.object_storage {
+        let object_storage: Arc<dyn ObjectStorage> = resilient(match self.object_storage {
             Some(storage) => storage,
             None => {
                 let uri = config.data_buckets.first().ok_or_else(|| {
@@ -276,7 +278,7 @@ impl S3StreamBuilder {
 
         // WAL: explicit override, else an object WAL on the wal_config bucket.
         // An overridden WAL owns its storage. Only the WAL built here gets the
-        // throttled storage.
+        // retry and throttle wrappers.
         let wal: Arc<dyn WriteAheadLog> = match self.wal {
             Some(wal) => wal,
             None => {
@@ -285,7 +287,7 @@ impl S3StreamBuilder {
                 wal_config.cluster_id = config.cluster_id.clone();
                 wal_config.node_id = config.node_id;
                 wal_config.epoch = config.node_epoch;
-                let wal_storage: Arc<dyn ObjectStorage> = throttled(Arc::new(
+                let wal_storage: Arc<dyn ObjectStorage> = resilient(Arc::new(
                     ObjectStoreAdapter::from_bucket_uri(&config.wal_config)?,
                 ));
                 Arc::new(ObjectWalService::new(wal_storage, wal_config))

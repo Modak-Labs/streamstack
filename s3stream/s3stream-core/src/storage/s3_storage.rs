@@ -495,7 +495,7 @@ impl Storage for S3Storage {
         let start = std::time::Instant::now();
         let (ack, rx) = oneshot::channel();
         let request = WalWriteRequest { record, ack };
-        self.inner.append0(request, false);
+        self.inner.append0(request);
         Box::pin(async move {
             let result = rx
                 .await
@@ -553,9 +553,11 @@ impl StorageInner {
         self.log_cache.size() < self.log_cache.capacity()
     }
 
-    /// Returns the backoff status.
-    fn append0(self: &Arc<Self>, request: WalWriteRequest, from_backoff: bool) -> bool {
-        if !from_backoff && !self.backoff.lock().expect("backoff poisoned").is_empty() {
+    /// Admit a fresh append. Returns true when the request was parked in the
+    /// backoff queue instead of reaching the WAL.
+    fn append0(self: &Arc<Self>, request: WalWriteRequest) -> bool {
+        if !self.backoff.lock().expect("backoff poisoned").is_empty() {
+            // Queue behind earlier waiting appends to keep stream order.
             self.backoff
                 .lock()
                 .expect("backoff poisoned")
@@ -563,12 +565,10 @@ impl StorageInner {
             return true;
         }
         if !self.try_acquire_permit() {
-            if !from_backoff {
-                self.backoff
-                    .lock()
-                    .expect("backoff poisoned")
-                    .push_back(request);
-            }
+            self.backoff
+                .lock()
+                .expect("backoff poisoned")
+                .push_back(request);
             tracing::warn!(
                 size = self.log_cache.size(),
                 capacity = self.log_cache.capacity(),
@@ -581,8 +581,11 @@ impl StorageInner {
         // spawned task below would hand the ordering decision to the scheduler,
         // and the log cache rejects a batch that is not contiguous with the
         // previous one for its stream.
-        let pending = match self.wal.submit(request.record.clone()) {
-            Ok(pending) => pending,
+        match self.wal.submit(request.record.clone()) {
+            Ok(pending) => {
+                self.spawn_durable_ack(pending, request.ack);
+                false
+            }
             Err(WalError::OverCapacity { .. }) => {
                 // WAL-full backpressure. Requeue and force upload.
                 tracing::warn!("[BACKOFF] wal over capacity");
@@ -591,51 +594,90 @@ impl StorageInner {
                     .lock()
                     .expect("backoff poisoned")
                     .push_back(request);
-                return true;
+                true
             }
             Err(e) => {
-                tracing::error!(error = %e, "append WAL fail");
-                let error = StreamError::from(e);
-                let inner = Arc::clone(self);
-                tokio::spawn(async move {
-                    inner.failure_handler.handle(&error).await;
-                    let _ = request.ack.send(Err(error));
-                });
-                return false;
+                self.fail_request(request.ack, e);
+                false
             }
-        };
+        }
+    }
+
+    /// The 100 ms retry loop for backed-off appends.
+    ///
+    /// The head request stays queued until the WAL accepts it, like the Java
+    /// `tryDrainBackoffRecords` peek-then-poll. Removing it first would drop
+    /// the request on failed admission and let fresh appends overtake an
+    /// empty-looking queue, leaving offset holes.
+    fn try_drain_backoff_records(self: &Arc<Self>) {
+        loop {
+            let record = {
+                let backoff = self.backoff.lock().expect("backoff poisoned");
+                match backoff.front() {
+                    Some(request) => request.record.clone(),
+                    None => return,
+                }
+            };
+            if !self.try_acquire_permit() {
+                tracing::warn!("try drain backoff record fail, still backoff");
+                return;
+            }
+            let outcome = self.wal.submit(record);
+            if matches!(outcome, Err(WalError::OverCapacity { .. })) {
+                tracing::warn!("try drain backoff record fail, still backoff");
+                self.maybe_force_upload();
+                return;
+            }
+            let request = self
+                .backoff
+                .lock()
+                .expect("backoff poisoned")
+                .pop_front()
+                .expect("only the drain task removes backoff entries");
+            match outcome {
+                Ok(pending) => self.spawn_durable_ack(pending, request.ack),
+                Err(WalError::OverCapacity { .. }) => unreachable!("handled above"),
+                Err(e) => self.fail_request(request.ack, e),
+            }
+        }
+    }
+
+    /// Complete the append once the WAL reports durability.
+    fn spawn_durable_ack(
+        self: &Arc<Self>,
+        pending: s3stream_wal::PendingAppend,
+        ack: oneshot::Sender<Result<(), StreamError>>,
+    ) {
         let inner = Arc::clone(self);
         tokio::spawn(async move {
             match pending.durable.await {
                 Ok(_result) => {
                     // Cache put already happened in the WAL's in-order confirm hook.
-                    let _ = request.ack.send(Ok(()));
+                    let _ = ack.send(Ok(()));
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "append WAL fail");
                     let error = StreamError::from(e);
                     inner.failure_handler.handle(&error).await;
-                    let _ = request.ack.send(Err(error));
+                    let _ = ack.send(Err(error));
                 }
             }
         });
-        false
     }
 
-    fn try_drain_backoff_records(self: &Arc<Self>) {
-        loop {
-            let request = {
-                let mut backoff = self.backoff.lock().expect("backoff poisoned");
-                match backoff.pop_front() {
-                    Some(request) => request,
-                    None => return,
-                }
-            };
-            if self.append0(request, true) {
-                tracing::warn!("try drain backoff record fail, still backoff");
-                return;
-            }
-        }
+    /// A hard WAL error, not backpressure. Report and fail the append.
+    fn fail_request(
+        self: &Arc<Self>,
+        ack: oneshot::Sender<Result<(), StreamError>>,
+        e: WalError,
+    ) {
+        tracing::error!(error = %e, "append WAL fail");
+        let error = StreamError::from(e);
+        let inner = Arc::clone(self);
+        tokio::spawn(async move {
+            inner.failure_handler.handle(&error).await;
+            let _ = ack.send(Err(error));
+        });
     }
 
     /// The in-order confirm hook. Runs in WAL confirm order by construction.
@@ -1121,6 +1163,44 @@ mod tests {
         assert_eq!(
             h.manager.get_streams(&[s2]).await.unwrap()[0].end_offset,
             20
+        );
+        h.storage.shutdown().await;
+    }
+
+    /// Backpressure regression: appends parked in the backoff queue must all
+    /// land. The drain used to pop before admission and destroy the request
+    /// on failure, leaving offset holes that poisoned the commit pipeline.
+    #[tokio::test]
+    async fn backoff_appends_are_never_dropped() {
+        let mut config = S3StorageConfig::test_defaults();
+        // A cache small enough that the pipelined appends below overrun it.
+        config.wal_cache_size = 32 * 1024;
+        config.wal_upload_threshold = 8 * 1024;
+        let h = harness(config);
+        h.storage.startup().await.unwrap();
+        let stream = open_stream(&h.manager).await;
+
+        // Enqueue ~200 KiB against a 32 KiB cache. Submit enqueues on the
+        // calling thread so offsets are deterministic.
+        let pending: Vec<_> = (0..100u64)
+            .map(|i| {
+                h.storage
+                    .submit(AppendContext::default(), record(stream, i, 1, &[i as u8; 2048]))
+            })
+            .collect();
+        for (i, result) in futures::future::join_all(pending)
+            .await
+            .into_iter()
+            .enumerate()
+        {
+            result.unwrap_or_else(|e| panic!("append {i} dropped: {e}"));
+        }
+
+        // Every record committed, no offset holes.
+        h.storage.force_upload(MATCH_ALL_STREAMS).await.unwrap();
+        assert_eq!(
+            h.manager.get_streams(&[stream]).await.unwrap()[0].end_offset,
+            100
         );
         h.storage.shutdown().await;
     }

@@ -73,6 +73,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"
 async-trait = "0.1"
 futures = "0.3"
 object_store = { version = "0.12", features = ["aws"] }
+fastrand = "2"
 md-5 = "0.10"
 hex = "0.4"
 tracing = "0.1"

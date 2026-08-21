@@ -17,6 +17,7 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 object_store = { workspace = true }
 md-5 = { workspace = true }
+fastrand = { workspace = true }
 hex = { workspace = true }
 tracing = { workspace = true }
 

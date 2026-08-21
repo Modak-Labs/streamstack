@@ -20,6 +20,9 @@ pub enum ObjectError {
     #[error("storage backend: {0}")]
     Backend(#[from] object_store::Error),
 
+    #[error("timed out: {key} (last error: {last})")]
+    Timeout { key: String, last: String },
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }

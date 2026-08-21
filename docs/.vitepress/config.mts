@@ -21,7 +21,7 @@ export default defineConfig({
     'PicoMQ is durable, real-time streams over HTTP, built on S3-compatible object storage.',
   base: process.env.BASE_PATH ?? '/',
   cleanUrls: true,
-  appearance: 'force-light',
+  appearance: false,
   srcDir: 'pages',
   vite: {
     publicDir: 'assets',

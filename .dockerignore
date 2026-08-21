@@ -1,0 +1,28 @@
+# Build context noise
+.git/
+.github/
+.idea/
+.vscode/
+**/.DS_Store
+
+# Rust
+**/target/
+**/*.rs.bk
+*.profraw
+
+# Docs site
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# Local runtime state
+/data/
+/objects/
+*.db
+*.db-wal
+*.db-shm
+
+# Property-test / generator leftovers
+**/proptest-regressions/
+s3stream/conformance/generator/.gradle/
+s3stream/conformance/generator/build/

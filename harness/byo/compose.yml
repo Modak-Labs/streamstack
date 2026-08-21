@@ -1,0 +1,26 @@
+# Pico only. Postgres + object storage are external (see .env.example).
+
+services:
+  pico:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PICO_PROTOCOL: ${PICO_PROTOCOL:-pico}
+      PICO_NODE_ID: ${PICO_NODE_ID:-1}
+      PICO_LISTEN: 0.0.0.0:4437
+      PICO_ADMIN_LISTEN: 0.0.0.0:9090
+      PICO_HTTP_ADDRESS: ${PICO_HTTP_ADDRESS:-http://localhost:4437}
+      PICO_META_URL: ${PICO_META_URL:?set PICO_META_URL to your Postgres URL}
+      PICO_STORAGE: ${PICO_STORAGE:?set PICO_STORAGE to your object-store URI}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    ports:
+      - "4437:4437"
+      - "9090:9090"
+    restart: unless-stopped

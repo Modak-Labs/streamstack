@@ -23,6 +23,31 @@ cargo run -p pico-cli -- serve \
 
 Every flag has a `PICO_*` env equivalent. `/health` and `/ready` are on `--admin-listen` (default `127.0.0.1:9090`).
 
+## Docker
+
+**aio**: Postgres + RustFS in compose (or lite: SQLite + file://).
+
+```bash
+cd harness/aio
+cp .env.example .env
+
+docker compose up --build                          # Postgres + RustFS, 1 node
+docker compose -f compose.cluster.yml up --build   # same stack, 2 nodes
+docker compose -f compose.lite.yml up --build      # SQLite + file://, no deps
+```
+
+Pico: `http://localhost:4437` (cluster also `:4438`). RustFS: API `:9000`, console `:9001`.
+
+**byo**: pico only, bring your own Postgres + s3-compatible object store.
+
+```bash
+cd harness/byo
+cp .env.example .env   # set PICO_META_URL, PICO_STORAGE, AWS_*
+
+docker compose up --build
+docker compose -f compose.cluster.yml up --build
+```
+
 ## Use it
 
 ```bash

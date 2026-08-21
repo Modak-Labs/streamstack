@@ -1,9 +1,10 @@
 //! The object storage abstraction used by everything above this crate.
 //!
 //! The trait is thin. The production impl (`ObjectStoreAdapter`) delegates
-//! to the `object_store` crate, which already provides retries, timeouts,
-//! and multipart. The `ObjectPath`/`ObjectInfo` shapes are exact: the WAL
-//! recovery protocol depends on them.
+//! to the `object_store` crate. Unbounded retries, throttle handling, and
+//! inflight limits live in [`crate::retry::RetryingObjectStorage`], which
+//! wraps the adapter at construction. The `ObjectPath`/`ObjectInfo` shapes
+//! are exact: the WAL recovery protocol depends on them.
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -239,7 +240,8 @@ fn backend_error(key: &str, e: object_store::Error) -> ObjectError {
 }
 
 /// Production adapter over the `object_store` crate.
-/// Retry/timeout/rate-limit plumbing is `object_store`'s job.
+/// One bounded retry pass per request is `object_store`'s job. Unbounded
+/// retries and inflight limits belong to `RetryingObjectStorage` above.
 pub struct ObjectStoreAdapter {
     inner: std::sync::Arc<dyn object_store::ObjectStore>,
     bucket_id: i16,

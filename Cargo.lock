@@ -2263,6 +2263,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "fastrand",
  "futures",
  "hex",
  "md-5",

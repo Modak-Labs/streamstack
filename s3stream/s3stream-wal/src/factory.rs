@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use s3stream_object::{IdUri, ObjectStorage, ObjectStoreAdapter};
+use s3stream_object::{IdUri, ObjectStorage, ObjectStoreAdapter, RetryingObjectStorage};
 
 use crate::object::{ObjectReservationService, ObjectWalConfig, ObjectWalService};
 use crate::{OpenMode, ReservationService, WalError, WriteAheadLog};
@@ -128,7 +128,9 @@ impl DefaultWalHandle {
         if let Some(storage) = &self.storage {
             return Ok(Arc::clone(storage));
         }
-        Ok(Arc::new(ObjectStoreAdapter::from_bucket_uri(wal_config)?))
+        Ok(Arc::new(RetryingObjectStorage::new(Arc::new(
+            ObjectStoreAdapter::from_bucket_uri(wal_config)?,
+        ))))
     }
 }
 
@@ -169,7 +171,9 @@ impl WalFactory for ObjectWalFactory {
         let storage = if let Some(storage) = &self.storage {
             Arc::clone(storage)
         } else {
-            Arc::new(ObjectStoreAdapter::from_bucket_uri(uri)?)
+            Arc::new(RetryingObjectStorage::new(Arc::new(
+                ObjectStoreAdapter::from_bucket_uri(uri)?,
+            )))
         };
         let mut config = ObjectWalConfig::from_uri(uri)?;
         config.cluster_id = self.cluster_id.clone();
