@@ -41,7 +41,7 @@ jobs:
       - name: Build
         working-directory: docs
         env:
-          BASE_PATH: /${{ github.event.repository.name }}/
+          BASE_PATH: /
         run: npm run build
 
       - name: Upload Pages artifact
