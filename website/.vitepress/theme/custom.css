@@ -420,15 +420,10 @@ html {
   text-align: left;
 }
 
-.VPFooter .copyright,
-.pico-doc-copyright {
+.VPFooter .copyright {
   font-size: 0.8rem;
   font-weight: 500;
   color: var(--vp-c-text-2);
-}
-
-.pico-doc-copyright {
-  margin-top: 1.5rem;
 }
 
 .VPDocFooter .pico-side-ico {
@@ -481,13 +476,13 @@ html {
   gap: 0.55rem;
 }
 
-.VPSidebarItem .item:hover {
+.VPSidebarItem .item:has(> .link):hover {
   background: rgb(var(--pico-ink-rgb) / 0.04);
 }
 
-.VPSidebarItem .item:hover .text,
-.VPSidebarItem .item:hover .pico-side-ico,
-.VPSidebarItem .item:hover .caret {
+.VPSidebarItem .item:has(> .link):hover .text,
+.VPSidebarItem .item:has(> .link):hover .pico-side-ico,
+.VPSidebarItem .item:has(> .link):hover .caret {
   color: var(--vp-c-brand-1) !important;
 }
 
@@ -580,61 +575,6 @@ html {
   }
 }
 
-@media (min-width: 1280px) {
-  .VPNavBar .social-links {
-    display: none !important;
-  }
-}
-
-.VPNavBar .pico-nav-actions {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  height: var(--vp-nav-height);
-}
-
-.VPNavBar .pico-nav-actions::before {
-  display: none;
-  width: 1px;
-  height: 14px;
-  margin-right: 8px;
-  background: rgb(var(--pico-ink-rgb) / 0.18);
-  content: "";
-}
-
-@media (min-width: 768px) {
-  .VPNavBar .pico-nav-actions::before {
-    display: block;
-  }
-}
-
-.VPNavBar .pico-nav-actions .VPSocialLinks {
-  display: flex;
-  align-items: center;
-  height: var(--vp-nav-height);
-}
-
-.VPNavBar .pico-nav-actions .VPSocialLink,
-.VPNavBar .pico-nav-actions .pico-picker__toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-}
-
-.VPNavBar .pico-nav-actions .VPSocialLink > * {
-  display: block;
-  flex-shrink: 0;
-}
-
-.VPNavBar .pico-nav-actions .VPSocialLink svg,
-.VPNavBar .pico-nav-actions .VPSocialLink [class^="vpi-social-"] {
-  display: block;
-  width: 20px;
-  height: 20px;
-}
-
 @media (max-width: 767px) {
   .VPNavBarHamburger .container {
     width: 20px !important;
@@ -677,6 +617,134 @@ html {
   .VPNavBarHamburger.active .bottom {
     top: 7px !important;
     transform: rotate(-45deg) !important;
+  }
+}
+
+.pico-diagram {
+  margin: 28px 0;
+  padding: 28px 16px;
+  background: var(--pico-surface-1);
+  border: 1px solid var(--pico-hairline);
+  overflow-x: auto;
+}
+
+.pico-diagram svg {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+  font-family: var(--vp-font-family-mono);
+}
+
+.pico-diagram .box {
+  fill: var(--pico-surface-0);
+  stroke: var(--pico-ink-6);
+  stroke-width: 1;
+}
+
+.pico-diagram .box-accent {
+  fill: var(--pico-surface-2);
+  stroke: var(--pico-ink-4);
+  stroke-width: 1;
+}
+
+.pico-diagram .label {
+  fill: var(--pico-ink-1);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.pico-diagram .sub {
+  fill: var(--pico-ink-4);
+  font-size: 11px;
+}
+
+.pico-diagram .edge {
+  stroke: var(--pico-ink-4);
+  stroke-width: 1.2;
+  fill: none;
+}
+
+.pico-diagram .edge-soft {
+  stroke: var(--pico-ink-6);
+  stroke-width: 1.2;
+  fill: none;
+  stroke-dasharray: 4 4;
+}
+
+.pico-diagram .arrow {
+  fill: var(--pico-ink-4);
+}
+
+@media (min-width: 1200px) and (min-height: 700px) {
+  .VPHome {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0;
+    align-content: start;
+    justify-items: start;
+    width: min(
+      var(--pico-content-max),
+      calc(100% - (2 * var(--pico-content-pad)))
+    );
+    min-height: calc(100vh - var(--vp-nav-height));
+    margin: 0 auto !important;
+    padding-top: 8.5rem;
+  }
+
+  .VPHome .VPHero {
+    grid-column: 1;
+    grid-row: 1;
+    width: 100%;
+    padding: 0 !important;
+  }
+
+  .VPHome section.engine {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    max-width: 48rem;
+    margin: 5rem 0 0;
+  }
+
+  .VPHome .VPHero .container {
+    width: 100%;
+    padding: 0;
+  }
+
+  .VPHome .VPHero .tagline {
+    margin-top: 1.1rem;
+  }
+
+  .VPHome .engine .engine__eyebrow {
+    margin-bottom: 0.9rem;
+    font-size: 1.15rem;
+  }
+
+  .VPHome .engine .engine__copy {
+    gap: 0.55rem;
+    padding: 1.35rem 1.5rem 1.15rem;
+  }
+
+  .VPHome .engine .engine__copy h3 {
+    font-size: 1.3rem;
+  }
+
+  .VPHome .engine .engine__body {
+    max-width: none;
+    min-height: 4.05rem;
+    font-size: 0.875rem;
+    line-height: 1.55;
+  }
+
+  .VPHome .engine .engine__tab {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .VPHome .engine .engine__tab-name {
+    font-size: 0.75rem;
+    white-space: nowrap;
   }
 }
 

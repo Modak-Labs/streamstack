@@ -1,0 +1,497 @@
+openapi: 3.1.0
+info:
+  title: PicoMQ HTTP API
+  version: 0.1.0
+  description: >
+    The Pico protocol, PicoMQ's native HTTP API, plus the admin API served by
+    each node's admin listener. A stream is addressed by its path. Requests for
+    a stream owned by another node return 307 with the owner's address.
+servers:
+  - url: http://127.0.0.1:4437
+    description: Protocol listener
+
+tags:
+  - name: streams
+    description: The Pico protocol.
+  - name: admin
+    description: Admin listener endpoints (default port 9090).
+
+paths:
+  /:
+    get:
+      tags: [streams]
+      summary: List streams
+      operationId: listStreams
+      parameters:
+        - name: prefix
+          in: query
+          description: Name prefix to filter by.
+          schema: { type: string, default: "/" }
+        - name: start_after
+          in: query
+          description: Continue after this name from the previous page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Page size cap.
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Streams under the prefix.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StreamList" }
+
+  /{stream}:
+    parameters:
+      - $ref: "#/components/parameters/Stream"
+    put:
+      tags: [streams]
+      summary: Create a stream
+      description: >
+        Idempotent. A request body is appended as the first records. Stream
+        names may contain slashes, the whole path is the name.
+      operationId: createStream
+      parameters:
+        - name: Content-Type
+          in: header
+          description: Stored as the stream's content type.
+          schema: { type: string, default: application/octet-stream }
+        - name: Pico-TTL
+          in: header
+          description: Retention in seconds.
+          schema: { type: integer, minimum: 0 }
+        - name: Pico-Expires-At
+          in: header
+          description: Absolute expiry time (RFC 3339 or unix ms).
+          schema: { type: string }
+        - name: Pico-Closed
+          in: header
+          description: Create the stream already sealed.
+          schema: { type: boolean }
+      requestBody:
+        description: Optional initial records.
+        content:
+          "*/*":
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Created.
+          headers:
+            Pico-Next-Seq: { $ref: "#/components/headers/NextSeq" }
+        "200":
+          description: Already exists with the same content type.
+          headers:
+            Pico-Next-Seq: { $ref: "#/components/headers/NextSeq" }
+        "409":
+          description: Exists with a different content type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      tags: [streams]
+      summary: Append records, or trim
+      description: >
+        The body is one record in the stream's content type, a JSON batch, or a
+        binary batch. With Pico-Trim-Seq set the request is a trim instead and
+        takes no body.
+      operationId: appendRecords
+      parameters:
+        - name: Pico-Producer-Id
+          in: header
+          description: Idempotent producer identity.
+          schema: { type: string }
+        - name: Pico-Producer-Epoch
+          in: header
+          schema: { type: integer, minimum: 0 }
+        - name: Pico-Producer-Seq
+          in: header
+          description: Per-producer sequence, accepted exactly once.
+          schema: { type: integer, minimum: 0 }
+        - name: Pico-Match-Seq
+          in: header
+          description: Conditional append, succeeds only at this tail sequence.
+          schema: { type: integer, minimum: 0 }
+        - name: Pico-Closed
+          in: header
+          description: Seal the stream after this append.
+          schema: { type: boolean }
+        - name: Pico-Trim-Seq
+          in: header
+          description: Trim records below this sequence instead of appending.
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        content:
+          "*/*":
+            schema: { type: string, format: binary }
+          application/vnd.picomq.batch+json:
+            schema: { $ref: "#/components/schemas/JsonBatch" }
+          application/vnd.picomq.batch:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Appended, or trimmed.
+          headers:
+            Pico-Start-Seq:
+              description: Sequence of the first appended record, or the new start after a trim.
+              schema: { type: integer }
+            Pico-Next-Seq: { $ref: "#/components/headers/NextSeq" }
+            Pico-Timestamp:
+              description: Timestamp assigned to the records.
+              schema: { type: string }
+        "409":
+          description: Producer conflict or sealed stream.
+          headers:
+            Pico-Expected-Seq:
+              description: The producer sequence the server expected next.
+              schema: { type: integer }
+            Pico-Received-Seq:
+              description: The sequence the server received.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [streams]
+      summary: Read records
+      operationId: readRecords
+      parameters:
+        - name: seq
+          in: query
+          description: Start position, a number or `now`. Defaults to 0.
+          schema: { type: string }
+        - name: count
+          in: query
+          description: Max records returned.
+          schema: { type: integer, minimum: 0 }
+        - name: bytes
+          in: query
+          description: Max bytes returned.
+          schema: { type: integer, minimum: 0 }
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, binary, raw], default: json }
+        - name: live
+          in: query
+          description: Wait for data instead of returning immediately.
+          schema: { type: string, enum: [long-poll, sse] }
+        - name: Last-Event-ID
+          in: header
+          description: SSE reconnect position, used when `seq` is absent.
+          schema: { type: string }
+        - name: If-None-Match
+          in: header
+          description: Catch-up reads honor the previous ETag with 304.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Records from `seq`.
+          headers:
+            Pico-Next-Seq: { $ref: "#/components/headers/NextSeq" }
+            Pico-Up-To-Date:
+              description: Present when the response reaches the tail.
+              schema: { type: boolean }
+            Pico-Closed:
+              description: Present when the stream is sealed and fully read.
+              schema: { type: boolean }
+            Pico-Cursor:
+              description: Opaque resume token for paginated catch-up reads.
+              schema: { type: string }
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReadPage" }
+            application/vnd.picomq.batch:
+              schema: { type: string, format: binary }
+            text/event-stream:
+              schema: { type: string }
+        "204":
+          description: Long poll timed out with no new records.
+        "304":
+          description: Nothing new since the ETag in If-None-Match.
+    head:
+      tags: [streams]
+      summary: Stream metadata
+      operationId: headStream
+      responses:
+        "200":
+          description: Metadata in headers, no body.
+          headers:
+            Pico-Next-Seq: { $ref: "#/components/headers/NextSeq" }
+            Pico-Start-Seq:
+              schema: { type: integer }
+            Pico-TTL:
+              schema: { type: integer }
+            Pico-Expires-At:
+              schema: { type: string }
+            Pico-Closed:
+              schema: { type: boolean }
+        "404":
+          description: No such stream.
+    delete:
+      tags: [streams]
+      summary: Delete a stream
+      operationId: deleteStream
+      responses:
+        "204":
+          description: Deleted. The name is immediately reusable.
+        "404":
+          description: No such stream.
+
+  /health:
+    get:
+      tags: [admin]
+      summary: Liveness
+      servers: [{ url: "http://127.0.0.1:9090" }]
+      responses:
+        "200":
+          description: The process is up.
+  /ready:
+    get:
+      tags: [admin]
+      summary: Readiness
+      servers: [{ url: "http://127.0.0.1:9090" }]
+      responses:
+        "200":
+          description: Serving and registered in the metadata state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready: { type: boolean }
+                  serving: { type: boolean }
+                  registered: { type: boolean }
+                  appliedIndex: { type: integer }
+                  nodeId: { type: integer }
+        "503":
+          description: Not ready.
+  /admin/cluster:
+    get:
+      tags: [admin]
+      summary: Cluster overview
+      servers: [{ url: "http://127.0.0.1:9090" }]
+      responses:
+        "200":
+          description: Identity, counts, applied index, lease holder, pending transfers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Cluster" }
+  /admin/nodes:
+    get:
+      tags: [admin]
+      summary: Registered nodes
+      servers: [{ url: "http://127.0.0.1:9090" }]
+      responses:
+        "200":
+          description: Every registered node.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items: { $ref: "#/components/schemas/Node" }
+  /admin/streams/{stream}:
+    get:
+      tags: [admin]
+      summary: One stream's placement and state
+      servers: [{ url: "http://127.0.0.1:9090" }]
+      parameters:
+        - $ref: "#/components/parameters/Stream"
+      responses:
+        "200":
+          description: Owner, state, epoch, offsets, pending transfer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StreamDetail" }
+        "404":
+          description: No such stream.
+  /admin/transfer:
+    post:
+      tags: [admin]
+      summary: Transfer a stream to another node
+      servers: [{ url: "http://127.0.0.1:9090" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stream, toNode]
+              properties:
+                stream: { type: string }
+                toNode: { type: integer }
+      responses:
+        "200":
+          description: Transfer recorded. Completion is asynchronous.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stream: { type: string }
+                  streamId: { type: integer }
+                  toNode: { type: integer }
+                  pending: { type: boolean }
+        "400":
+          description: Invalid target or a conflicting transfer is pending.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /admin/nodes/{id}:
+    post:
+      tags: [admin]
+      summary: Update a node's placement slots
+      servers: [{ url: "http://127.0.0.1:9090" }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slots]
+              properties:
+                slots: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: The updated node.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Node" }
+        "404":
+          description: No such node.
+
+components:
+  parameters:
+    Stream:
+      name: stream
+      in: path
+      required: true
+      description: The stream name. Names are paths and may contain slashes.
+      schema: { type: string }
+  headers:
+    NextSeq:
+      description: The stream's next sequence. Pass as `seq` to resume.
+      schema: { type: integer }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        message: { type: string }
+        next_seq: { type: integer }
+    JsonBatch:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          items:
+            type: object
+            required: [body]
+            properties:
+              body: { type: string }
+              headers:
+                type: object
+                additionalProperties: { type: string }
+    ReadPage:
+      type: array
+      items:
+        type: object
+        required: [seq, timestamp]
+        properties:
+          seq: { type: integer }
+          timestamp: { type: integer }
+          headers:
+            type: object
+            additionalProperties: { type: string }
+          body:
+            type: string
+            description: Present when the record body is valid UTF-8.
+          body_b64:
+            type: string
+            description: Base64 body, present when the body is not UTF-8.
+    StreamList:
+      type: object
+      properties:
+        streams:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              content_type: { type: string }
+              start_seq: { type: integer }
+              next_seq: { type: integer }
+              closed: { type: boolean }
+              ttl: { type: integer }
+              expires_at: { type: string }
+        has_more: { type: boolean }
+    Cluster:
+      type: object
+      properties:
+        clusterId: { type: string }
+        nodeId: { type: integer }
+        nodeEpoch: { type: integer }
+        advertisedAddress: { type: string }
+        registered: { type: boolean }
+        appliedIndex: { type: integer }
+        streamCount: { type: integer }
+        objectCount: { type: integer }
+        destroyedObjectBacklog: { type: integer }
+        leaseHolder:
+          type: [boolean, "null"]
+          description: Whether this node holds the maintenance lease. Null when unknown.
+        pendingTransfers:
+          type: array
+          items:
+            type: object
+            properties:
+              streamId: { type: integer }
+              fromNode: { type: integer }
+              toNode: { type: integer }
+    Node:
+      type: object
+      properties:
+        nodeId: { type: integer }
+        nodeEpoch: { type: integer }
+        advertisedAddress: { type: string }
+        slots: { type: integer }
+        openingCount: { type: integer }
+        placedCount: { type: integer }
+        local: { type: boolean }
+    StreamDetail:
+      type: object
+      properties:
+        name: { type: string }
+        streamId: { type: integer }
+        ownerNodeId: { type: [integer, "null"] }
+        ownerAdvertisedAddress: { type: [string, "null"] }
+        ownerLocal: { type: boolean }
+        contentType: { type: string }
+        ttlSeconds: { type: [integer, "null"] }
+        expiresAtMs: { type: [integer, "null"] }
+        closed: { type: boolean }
+        state:
+          type: [string, "null"]
+          description: Placement state, opening or placed. Null before first open.
+        epoch: { type: [integer, "null"] }
+        nodeId:
+          type: [integer, "null"]
+          description: Node in the placement row, may lag the effective owner during a transfer.
+        startOffset: { type: [integer, "null"] }
+        endOffset: { type: [integer, "null"] }
+        pendingTransfer:
+          type: [object, "null"]
+          properties:
+            fromNode: { type: integer }
+            toNode: { type: integer }

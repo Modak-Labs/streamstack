@@ -1,15 +1,15 @@
-name: docs
+name: website
 
 on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
+      - 'website/**'
+      - '.github/workflows/website.yml'
   pull_request:
     paths:
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
+      - 'website/**'
+      - '.github/workflows/website.yml'
   workflow_dispatch:
 
 permissions:
@@ -32,14 +32,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: docs/package-lock.json
+          cache-dependency-path: website/package-lock.json
 
       - name: Install
-        working-directory: docs
+        working-directory: website
         run: npm ci
 
       - name: Build
-        working-directory: docs
+        working-directory: website
         env:
           BASE_PATH: /
         run: npm run build
@@ -48,7 +48,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
-          path: docs/.vitepress/dist
+          path: website/.vitepress/dist
 
   deploy:
     name: deploy

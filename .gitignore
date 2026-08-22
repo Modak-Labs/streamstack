@@ -15,9 +15,9 @@
 **/proptest-regressions/
 
 # Docs (VitePress)
-docs/node_modules/
-docs/.vitepress/cache/
-docs/.vitepress/dist/
+website/node_modules/
+website/.vitepress/cache/
+website/.vitepress/dist/
 
 # Dashboard (Vite)
 dashboard/node_modules/

@@ -1,18 +1,42 @@
 import { defineConfig } from 'vitepress';
 
-function sideItem(label: string, link: string, path: string) {
-  return {
-    text: `<span class="pico-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none">${path}</svg></span>${label}`,
-    link,
-  };
-}
-
 const docsSidebar = [
-  sideItem(
-    'Docs',
-    '/docs',
-    '<path d="M6 4.5h9.5A2.5 2.5 0 0 1 18 7v13H8.5A2.5 2.5 0 0 0 6 17.5V4.5Z" stroke="currentColor" stroke-width="1.7"/><path d="M6 4.5A2.5 2.5 0 0 0 3.5 7v10.5A2.5 2.5 0 0 1 6 17.5" stroke="currentColor" stroke-width="1.7"/>',
-  ),
+  {
+    text: 'Getting started',
+    items: [
+      { text: 'Introduction', link: '/docs/' },
+      { text: 'Quick start', link: '/docs/quick-start' },
+    ],
+  },
+  {
+    text: 'Design',
+    items: [
+      { text: 'Overview', link: '/docs/design/overview' },
+      { text: 'Metadata', link: '/docs/design/metadata' },
+      { text: 'Streams', link: '/docs/design/streams' },
+      { text: 'Writes', link: '/docs/design/writes' },
+      { text: 'Reads', link: '/docs/design/reads' },
+      { text: 'Ownership & routing', link: '/docs/design/ownership' },
+      { text: 'Transfers', link: '/docs/design/transfers' },
+      { text: 'Leases', link: '/docs/design/leases' },
+      { text: 'Garbage collection', link: '/docs/design/gc' },
+      { text: 'Protocols', link: '/docs/design/protocols' },
+    ],
+  },
+  {
+    text: 'Operations',
+    items: [
+      { text: 'CLI', link: '/docs/operations/cli' },
+      { text: 'Configuration', link: '/docs/operations/configuration' },
+      { text: 'Deployment', link: '/docs/operations/deployment' },
+      { text: 'Admin API & dashboard', link: '/docs/operations/admin' },
+      { text: 'Tuning', link: '/docs/operations/tuning' },
+    ],
+  },
+  {
+    text: 'API reference',
+    items: [{ text: 'HTTP API', link: '/docs/api' }],
+  },
 ];
 
 export default defineConfig({
@@ -49,25 +73,18 @@ export default defineConfig({
         href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Marcellus&family=Playfair+Display:wght@400;500;600&display=swap',
       },
     ],
-    [
-      'script',
-      {},
-      `(function(){function m(h,a){var n=parseInt(h.slice(1),16),r=n>>16,g=n>>8&255,b=n&255;return'#'+[r,g,b].map(function(c){c=Math.round(c+(255-c)*a);return c.toString(16).padStart(2,'0')}).join('')}try{var h=localStorage.getItem('pico-accent-hex-v1');if(h&&/^#[0-9a-fA-F]{6}$/.test(h)){var s=document.documentElement.style;var n=parseInt(h.slice(1),16);s.setProperty('--vp-c-brand-1',h);s.setProperty('--vp-c-brand-2',m(h,.18));s.setProperty('--vp-c-brand-3',m(h,.36));s.setProperty('--vp-c-brand-soft','rgb('+(n>>16)+' '+(n>>8&255)+' '+(n&255)+' / 0.14)')}}catch(e){}})();`,
-    ],
   ],
   themeConfig: {
     siteTitle: false,
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Docs', link: '/docs' },
+      { text: 'GitHub', link: 'https://github.com/picomq/picomq' },
     ],
     sidebar: docsSidebar,
     search: {
       provider: 'local',
     },
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/picomq/picomq' },
-    ],
     outline: {
       level: [1, 3],
       label: 'On this page',

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
-import { useData } from 'vitepress';
 
 const WORDS = [
   'Object Storage',
@@ -10,8 +9,6 @@ const WORDS = [
   'Google Cloud Storage',
   'Fly Tigris',
 ] as const;
-
-const { frontmatter } = useData();
 
 const rotor = ref<HTMLElement | null>(null);
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -94,6 +91,7 @@ onBeforeUnmount(() => {
     </span>
   </h1>
   <p class="tagline">
-    {{ frontmatter.hero?.tagline }}
+    PicoMQ is durable, real-time streams over HTTP,<br />
+    built on S3-compatible object storage.
   </p>
 </template>

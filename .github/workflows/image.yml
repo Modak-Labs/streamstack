@@ -2,17 +2,7 @@ name: image
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
-    paths:
-      - 'Dockerfile'
-      - '.dockerignore'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'picomq/**'
-      - 's3stream/**'
-      - '.github/workflows/image.yml'
   workflow_dispatch:
 
 permissions:
@@ -42,7 +32,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=

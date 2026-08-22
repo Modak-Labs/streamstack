@@ -11,9 +11,9 @@
 *.profraw
 
 # Docs site
-docs/node_modules/
-docs/.vitepress/cache/
-docs/.vitepress/dist/
+website/node_modules/
+website/.vitepress/cache/
+website/.vitepress/dist/
 
 # Dashboard
 dashboard/node_modules/
