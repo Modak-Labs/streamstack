@@ -3,11 +3,12 @@ import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 const WORDS = [
   'Object Storage',
-  'AWS S3',
-  'MinIO',
+  'Amazon S3',
   'Cloudflare R2',
   'Google Cloud Storage',
-  'Fly Tigris',
+  'MinIO',
+  'RustFS',
+  'Tigris',
 ] as const;
 
 const rotor = ref<HTMLElement | null>(null);

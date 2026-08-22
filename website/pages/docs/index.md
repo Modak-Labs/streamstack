@@ -57,4 +57,4 @@ The structure follows from that. A node can be stopped and replaced at any time 
 
 PicoMQ suits anything modeled as many ordered, resumable streams: a stream per user session or chat, per device, per workflow run, or per agent conversation. Readers resume from any position, so it also serves audit trails, per-entity event history, and real-time delivery to many concurrent readers.
 
-It is not built for sub-millisecond appends. Durability comes from object storage, so an append costs one round trip there, typically tens of milliseconds.
+It is not built for single-digit millisecond appends. Durability comes from object storage, so an append costs one round trip there, typically tens of milliseconds.

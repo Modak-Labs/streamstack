@@ -28,7 +28,13 @@ const docsSidebar = [
     items: [
       { text: 'CLI', link: '/docs/operations/cli' },
       { text: 'Configuration', link: '/docs/operations/configuration' },
-      { text: 'Deployment', link: '/docs/operations/deployment' },
+      {
+        text: 'Deployment',
+        items: [
+          { text: 'Docker', link: '/docs/operations/deployment/docker' },
+          { text: 'Fly', link: '/docs/operations/deployment/fly' },
+        ],
+      },
       { text: 'Admin API & dashboard', link: '/docs/operations/admin' },
       { text: 'Tuning', link: '/docs/operations/tuning' },
     ],

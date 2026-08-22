@@ -48,9 +48,9 @@ Inside the engine the record goes to two places. It enters the log cache, which 
 
 The WAL is a sequence of small objects in the object store, written by one node under its own key prefix. Incoming records accumulate into a bulk, and each bulk becomes one `PUT`. Uploads are pipelined, so several bulks can be in flight, but acknowledgements are delivered in submission order. A record is acknowledged only when its bulk and every bulk before it are stored.
 
-Group commit is what makes this affordable. One upload of a few hundred kilobytes carries every record that arrived while the previous upload was in flight, so per-record cost drops as concurrency rises. A single append on an idle stream pays one object store round trip.
+Group commit is what makes this affordable. One upload of a few hundred kilobytes contains every record that arrived while the previous upload was in flight, so per-record cost drops as concurrency rises. A single append on an idle stream pays one object store round trip.
 
-Records are framed with a checksum and the WAL objects carry the node's epoch. A node that lost its registration cannot extend its WAL past a takeover, which is part of the fencing described in [Streams](/docs/design/streams).
+Records are framed with a checksum and the WAL objects include the node's epoch. A node that lost its registration cannot extend its WAL past a takeover, which is part of the fencing described in [Streams](/docs/design/streams).
 
 ## From WAL to committed objects
 

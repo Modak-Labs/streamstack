@@ -75,7 +75,7 @@ Reads records from a sequence. Without `live` it returns what exists and stops. 
 | `Pico-Closed` | `true` when the stream is sealed and fully read. |
 | `Pico-Cursor` | Opaque resume token for paginated catch-up reads. |
 
-Catch-up responses carry an `ETag` and honor `If-None-Match` with `304`, so polling readers that are caught up transfer nothing. A long poll that times out with no data returns `204`. SSE delivers each record as an event with its sequence as the event id, and ends with a control event when the stream closes.
+Catch-up responses include an `ETag` and honor `If-None-Match` with `304`, so polling readers that are caught up transfer nothing. A long poll that times out with no data returns `204`. SSE delivers each record as an event with its sequence as the event id, and ends with a control event when the stream closes.
 
 ## Inspect
 

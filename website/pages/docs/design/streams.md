@@ -38,7 +38,7 @@ Creating a stream writes two things through the metadata log. First an internal 
 
 ## Epochs
 
-Every internal stream carries an epoch, a counter that increases each time the stream is opened. A stream that was created but never opened sits at epoch `-1`. Opening a stream assigns it to a node and bumps the epoch through the metadata log, which fences any writer still holding the previous epoch. Data written under a stale epoch is rejected, so a node that lost ownership cannot corrupt the stream even if it keeps running.
+Every internal stream has an epoch, a counter that increases each time the stream is opened. A stream that was created but never opened sits at epoch `-1`. Opening a stream assigns it to a node and bumps the epoch through the metadata log, which fences any writer still holding the previous epoch. Data written under a stale epoch is rejected, so a node that lost ownership cannot corrupt the stream even if it keeps running.
 
 This is the same fencing idea the nodes themselves use, applied per stream. The epoch never resets, so the pair of stream id and epoch uniquely identifies one continuous session of ownership.
 

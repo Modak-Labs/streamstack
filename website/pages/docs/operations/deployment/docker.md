@@ -1,6 +1,6 @@
-# Deployment
+# Docker
 
-A PicoMQ cluster is defined by two shared resources. Every node points at the same Postgres database and the same object storage bucket, and that is the entire membership mechanism. There is no join procedure, no seed list, and no quorum to size. A node that starts with the right `--meta-url` and `--storage` registers itself and is part of the cluster.
+A PicoMQ cluster is defined by two shared resources. Every node points at the same Postgres database and the same object storage bucket, and that is the entire membership mechanism. There is no join procedure, no seed list, and no quorum to size. A node that starts with the right `--meta-url` and `--storage` registers itself and is part of the cluster. This page covers running nodes yourself, from a bare binary to Docker Compose.
 
 ## Single node
 
@@ -25,11 +25,11 @@ pico serve --node-id 1 --listen 0.0.0.0:4437 \
 
 Routing shapes what sits in front of the nodes. Clients are redirected to a stream's owner with its advertised address, so clients must be able to reach every node directly and follow redirects. A load balancer works fine as the entry point for creates and first requests, but it should not be the only reachable address, since redirects bypass it by design.
 
-## Docker
+## Images and compose
 
 Images are published to GitHub Container Registry on every merge, tagged `latest`, by version, and by commit SHA. The image builds the dashboard and embeds it, so the admin listener serves the full UI with no extra setup.
 
-The repository carries two compose harnesses. `harness/aio` is self-contained, starting Postgres and RustFS alongside one or two nodes, and `harness/byo` has the same layout against an existing Postgres and object store, configured through `.env`.
+The repository has two compose harnesses. `harness/aio` is self-contained, starting Postgres and RustFS alongside one or two nodes, and `harness/byo` has the same layout against an existing Postgres and object store, configured through `.env`.
 
 ```bash
 cd harness/aio && cp .env.example .env

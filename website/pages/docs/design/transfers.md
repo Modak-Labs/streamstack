@@ -42,7 +42,7 @@ There is no node-to-node call anywhere in the process. Each node watches the pub
 </svg>
 </div>
 
-The source sees the pending record in its view, stops accepting new appends for the stream, flushes what is buffered, and closes it, recording the epoch it closed at. It then proposes the completion command carrying that epoch. Apply accepts the completion only if the stream is closed at exactly that epoch, then re-points the stream at the target and removes the pending record in one atomic step.
+The source sees the pending record in its view, stops accepting new appends for the stream, flushes what is buffered, and closes it, recording the epoch it closed at. It then proposes the completion command with that epoch. Apply accepts the completion only if the stream is closed at exactly that epoch, then re-points the stream at the target and removes the pending record in one atomic step.
 
 The target sees the pending record disappear and the stream now placed on it, and opens the stream immediately at the next epoch. This pre-warm means the first client request after the transfer finds the stream already open instead of paying the open cost.
 

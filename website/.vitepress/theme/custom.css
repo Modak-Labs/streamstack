@@ -460,6 +460,21 @@ html {
   border-radius: var(--pico-radius);
 }
 
+.VPSidebarItem.level-1 > .item:has(+ .items) {
+  min-height: 2.15rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.VPSidebarItem.level-1 > .item:has(+ .items) .text {
+  color: var(--vp-c-text-2);
+}
+
+.VPSidebarItem.level-1 > .items {
+  margin-left: 0.65rem;
+  padding-left: 0.35rem;
+  border-left: 1px solid var(--vp-c-divider);
+}
+
 .VPSidebarItem .link {
   min-height: 2.15rem;
   padding: 0.35rem 0.65rem;
@@ -743,8 +758,7 @@ html {
   }
 
   .VPHome .engine .engine__tab-name {
-    font-size: 0.75rem;
-    white-space: nowrap;
+    font-size: 0.8125rem;
   }
 }
 

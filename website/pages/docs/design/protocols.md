@@ -4,7 +4,7 @@ PicoMQ speaks two client protocols. The Pico protocol is the native API, with al
 
 ## The resource model
 
-The deliberate choice here is that a stream is just a URL and the standard methods carry their usual meaning: `PUT` creates, `POST` appends, `GET` reads, `DELETE` removes. There is no session, no handshake, and no client library required, so anything that can issue an HTTP request is a full client. The exact endpoints and status codes are in the [API reference](/docs/api).
+The deliberate choice here is that a stream is just a URL and the standard methods keep their usual meaning: `PUT` creates, `POST` appends, `GET` reads, `DELETE` removes. There is no session, no handshake, and no client library required, so anything that can issue an HTTP request is a full client. The exact endpoints and status codes are in the [API reference](/docs/api).
 
 The second choice is that all position state travels in response headers: the next offset, whether the reader is at the tail, a cursor for resuming. The server keeps nothing about its consumers, so a reader can disappear for a week, come back with its last offset, and continue. This is also what makes reads through redirects and transfers safe, since any node can answer from just the request.
 
@@ -37,7 +37,7 @@ Appends come in three shapes, a single body, a JSON batch, and a binary batch, e
 
 ## Producers
 
-Exactly-once appends over HTTP need the server to remember, because a client that times out cannot know whether its write landed. Both protocols solve this the same way: a producer identifies itself with an id, an epoch, and a per-record sequence number, the server accepts each sequence once, acknowledges repeats without writing, and rejects stale epochs. A mismatch response carries what the server expected next to what it received, so a producer can tell a lost acknowledgement from a real gap. The state behind this is in the stream's registry entry, described in [Streams](/docs/design/streams), and survives restarts and transfers.
+Exactly-once appends over HTTP need the server to remember, because a client that times out cannot know whether its write landed. Both protocols solve this the same way: a producer identifies itself with an id, an epoch, and a per-record sequence number, the server accepts each sequence once, acknowledges repeats without writing, and rejects stale epochs. A mismatch response includes what the server expected next to what it received, so a producer can tell a lost acknowledgement from a real gap. The state behind this is in the stream's registry entry, described in [Streams](/docs/design/streams), and survives restarts and transfers.
 
 ## Routing at the edge
 

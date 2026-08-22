@@ -141,8 +141,9 @@ function select(index: number) {
 
 .engine__tab-name {
   min-width: 0;
-  font-size: 0.86rem;
-  font-weight: 600;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.8125rem;
+  font-weight: 400;
   line-height: 1.25;
 }
 

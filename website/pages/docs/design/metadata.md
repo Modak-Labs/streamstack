@@ -49,13 +49,13 @@ A proposal returns only after the local tailer has applied its row. The view is 
 
 A tailer task on every node fetches rows past its applied index and applies each command to an in-memory state. Apply is a pure function: the same log always produces the same state on every node, with no clocks and no node-local input.
 
-Apply is also where the rules are enforced. Each command validates against the current state and either mutates it or returns an error to the proposer. Duplicate work is answered with a distinct redundant result, which makes retries safe. Commands that carry a node identity are checked against the node's registered epoch, so a restarted node at a higher epoch invalidates everything still in flight from its predecessor.
+Apply is also where the rules are enforced. Each command validates against the current state and either mutates it or returns an error to the proposer. Duplicate work is answered with a distinct redundant result, which makes retries safe. Commands that include a node identity are checked against the node's registered epoch, so a restarted node at a higher epoch invalidates everything still in flight from its predecessor.
 
 The state is built from persistent maps. Cloning it for a published view is cheap structural sharing, not a copy, so publishing a new view per applied row costs little even with large state.
 
 ## Views
 
-Readers never query SQL. Each node holds one immutable view, swapped atomically by the tailer, carrying the state and the applied index. Anything answering requests loads the current view without locks. Code that needs to observe a future write waits for the applied index to reach a target instead of polling the database.
+Readers never query SQL. Each node holds one immutable view, swapped atomically by the tailer, holding the state and the applied index. Anything answering requests loads the current view without locks. Code that needs to observe a future write waits for the applied index to reach a target instead of polling the database.
 
 This is what makes a slow metadata database tolerable. Reads keep their latency regardless of the database, and only new commands wait.
 

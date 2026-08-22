@@ -12,7 +12,7 @@ pico --protocol ds read /streams/orders
 pico --http2 append /streams/orders
 ```
 
-`--endpoint` (`PICO_ENDPOINT`) is the server base URL, defaulting to `http://127.0.0.1:4437`. `--protocol` (`PICO_PROTOCOL`) selects `pico` or `ds`, since the two protocols differ on the wire. `--http2` (`PICO_HTTP2`) speaks HTTP/2 over cleartext, which lets one connection carry many concurrent appends.
+`--endpoint` (`PICO_ENDPOINT`) is the server base URL, defaulting to `http://127.0.0.1:4437`. `--protocol` (`PICO_PROTOCOL`) selects `pico` or `ds`, since the two protocols differ on the wire. `--http2` (`PICO_HTTP2`) speaks HTTP/2 over cleartext, which multiplexes many concurrent appends over one connection.
 
 ## Profiles
 
@@ -70,4 +70,4 @@ It exercises the same client path as `append` and `read`, so the numbers reflect
 
 ## Serving
 
-`pico serve` runs a node. Its flags configure the listeners, the metadata database, and the object store, and every one has a `PICO_*` environment variable. The flags are covered in [Configuration](/docs/operations/configuration) and full deployment layouts in [Deployment](/docs/operations/deployment).
+`pico serve` runs a node. Its flags configure the listeners, the metadata database, and the object store, and every one has a `PICO_*` environment variable. The flags are covered in [Configuration](/docs/operations/configuration) and full deployment layouts in [Deployment](/docs/operations/deployment/docker).

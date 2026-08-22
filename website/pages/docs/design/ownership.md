@@ -58,7 +58,7 @@ Any node accepts any request. The receiving node resolves the name to a stream i
 </svg>
 </div>
 
-A name that is not registered yet is served locally, which is how creates land wherever the client happens to connect. A stream with a pending transfer routes to the transfer target, covered in [Transfers](/docs/design/transfers). A stream that is opened, or placed but never opened, routes to its owning node, as a `307` redirect carrying the owner's advertised address. A closed stream is served locally, so any node can revive one whose previous owner is gone. The next open re-places it and routing converges on the new owner.
+A name that is not registered yet is served locally, which is how creates land wherever the client happens to connect. A stream with a pending transfer routes to the transfer target, covered in [Transfers](/docs/design/transfers). A stream that is opened, or placed but never opened, routes to its owning node, as a `307` redirect to the owner's advertised address. A closed stream is served locally, so any node can revive one whose previous owner is gone. The next open re-places it and routing converges on the new owner.
 
 ## Why a stale view is safe
 
