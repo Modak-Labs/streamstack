@@ -19,6 +19,11 @@ docs/node_modules/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 
+# Dashboard (Vite)
+dashboard/node_modules/
+picomq/pico-frontend/_dashboard/*
+!picomq/pico-frontend/_dashboard/.gitkeep
+
 # Env / secrets
 .env
 .env.*

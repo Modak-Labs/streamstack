@@ -1,5 +1,7 @@
-//! The `pico` binary: serve, stream commands, bench, and config profiles.
+//! The `pico` binary: serve, stream commands, admin, bench, and config
+//! profiles.
 
+mod admin;
 mod bench;
 mod config;
 mod io;
@@ -9,6 +11,7 @@ mod stream;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
+use crate::admin::AdminArgs;
 use crate::bench::BenchArgs;
 use crate::config::ConfigCommand;
 use crate::serve::ServeArgs;
@@ -41,6 +44,9 @@ enum Command {
 
     /// Write and read a temporary stream, and report throughput and latency.
     Bench(BenchArgs),
+
+    /// Inspect and operate a node via its admin listener.
+    Admin(AdminArgs),
 
     /// Manage saved endpoints.
     #[command(subcommand)]
@@ -80,9 +86,14 @@ async fn run(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
     if let Command::Config(command) = command {
         return Ok(config::run(command, &endpoint)?);
     }
+    // Admin talks to the admin listener, not the stream endpoint, so it does
+    // not resolve a profile.
+    if let Command::Admin(args) = command {
+        return Ok(admin::run(args).await?);
+    }
     let target = endpoint.resolve()?;
     match command {
-        Command::Config(_) => unreachable!("handled above"),
+        Command::Config(_) | Command::Admin(_) => unreachable!("handled above"),
         Command::Stream(command) => Ok(stream::run(&target, command).await?),
         Command::Bench(args) => Ok(bench::run(&target, args).await?),
         Command::Serve(args) => {

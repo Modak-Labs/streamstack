@@ -5,6 +5,9 @@
 //! view. The decision table:
 //!
 //! 1. name not registered → local (create lands here).
+//! 2. pending transfer → the transfer target.
+//! 3. opened, or placed but never opened → the owning node.
+//! 4. closed → local (any node can revive it).
 
 use std::sync::Arc;
 
@@ -53,13 +56,30 @@ impl OwnershipService for MetadataOwnershipService {
             return Ok(Owner::local(None));
         };
         let view = self.views.load();
-        let Some(stream) = view.state.get_stream(stream_id) else {
+
+        // A pending transfer routes to the target, which stalls the open
+        // until the handoff settles.
+        if let Some(pending) = view.state.pending_transfers.get(&stream_id) {
+            if pending.to_node == self.node_id {
+                return Ok(Owner::local(Some(stream_id)));
+            }
+            return Ok(match view.state.get_node_address(pending.to_node) {
+                Some(address) => Owner::remote(stream_id, pending.to_node, address.to_owned()),
+                None => Owner::local(Some(stream_id)),
+            });
+        }
+
+        let Some(row) = view.state.streams.get(&stream_id).copied() else {
             return Ok(Owner::local(Some(stream_id)));
         };
-        if stream.state != StreamState::Opened {
+        // Opened streams route to their owner. Placed streams that never
+        // opened route to their placement. Closed streams stay local so any
+        // node can revive them after their owner shut down.
+        let routable = row.state == StreamState::Opened || (row.epoch == -1 && row.node_id != -1);
+        if !routable {
             return Ok(Owner::local(Some(stream_id)));
         }
-        let owner_id = stream.node_id;
+        let owner_id = row.node_id;
         if owner_id == self.node_id {
             return Ok(Owner::local(Some(stream_id)));
         }

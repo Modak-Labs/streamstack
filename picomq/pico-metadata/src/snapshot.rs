@@ -4,7 +4,9 @@ use s3stream::{
     StreamState,
 };
 
-use crate::state::{MetadataState, NodeRow, StreamObjectRow, StreamRow, StreamSetObjectRow};
+use crate::state::{
+    MetadataState, NodeRow, PendingTransfer, StreamObjectRow, StreamRow, StreamSetObjectRow,
+};
 
 /// Current snapshot format version. Pre-release: no compatibility shims for
 /// older layouts. Bump only once real deployments have snapshots to migrate.
@@ -83,6 +85,13 @@ pub fn encode(state: &MetadataState) -> Bytes {
         put_str(&mut buf, key);
         buf.put_u32_le(value.len() as u32);
         buf.put_slice(value);
+    }
+
+    buf.put_u64_le(state.pending_transfers.len() as u64);
+    for (stream_id, pending) in state.pending_transfers.iter() {
+        buf.put_u64_le(*stream_id);
+        buf.put_i32_le(pending.from_node);
+        buf.put_i32_le(pending.to_node);
     }
 
     buf.freeze()
@@ -198,6 +207,15 @@ pub fn decode(bytes: &[u8]) -> Result<MetadataState, SnapshotError> {
         }
         state.kv.insert(key, Bytes::copy_from_slice(&buf[..len]));
         buf.advance(len);
+    }
+
+    for _ in 0..get_u64(&mut buf)? {
+        let stream_id = get_u64(&mut buf)?;
+        let from_node = get_i32(&mut buf)?;
+        let to_node = get_i32(&mut buf)?;
+        state
+            .pending_transfers
+            .insert(stream_id, PendingTransfer { from_node, to_node });
     }
 
     if buf.has_remaining() {
@@ -416,6 +434,15 @@ mod tests {
             )
             .unwrap();
         }
+        apply(
+            &mut state,
+            &MetadataCommand::TransferStream {
+                stream_id: 0,
+                from_node: 1,
+                to_node: 2,
+            },
+        )
+        .unwrap();
         state
     }
 

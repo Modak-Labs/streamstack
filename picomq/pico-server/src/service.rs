@@ -31,6 +31,10 @@ const DEFAULT_LIST_LIMIT: usize = 1000;
 const MAX_LIST_LIMIT: usize = 10_000;
 const TAIL_MAX_BYTES: usize = 4 * 1024 * 1024;
 const TAIL_MAX_RECORDS: usize = 4096;
+/// How long the transfer target holds an open attempt before giving up on a
+/// pending transfer settling.
+const TRANSFER_SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
+const TRANSFER_SETTLE_POLL: Duration = Duration::from_millis(50);
 
 /// Recent appended records kept in memory so tail reads skip the engine fetch.
 #[derive(Default)]
@@ -783,7 +787,10 @@ impl S3StreamService {
         })
     }
 
-    async fn ensure_open(&self, stream_id: u64) -> Result<Arc<dyn Stream>, ServiceError> {
+    pub(crate) async fn ensure_open(
+        &self,
+        stream_id: u64,
+    ) -> Result<Arc<dyn Stream>, ServiceError> {
         if let Some(existing) = self.open_streams.lock().unwrap().get(&stream_id) {
             return Ok(existing.clone());
         }
@@ -791,6 +798,7 @@ impl S3StreamService {
         if let Some(existing) = self.open_streams.lock().unwrap().get(&stream_id) {
             return Ok(existing.clone());
         }
+        self.await_transfer_settled(stream_id).await?;
         let epoch = self.next_epoch(stream_id);
         let opened = self
             .stream_client
@@ -811,6 +819,90 @@ impl S3StreamService {
             .unwrap()
             .insert(stream_id, opened.stream_epoch());
         Ok(opened)
+    }
+
+    /// Hold back a local open while the stream has a pending transfer. The
+    /// transfer target waits for the completion to land so its first request
+    /// stalls instead of failing. Any other node refuses immediately.
+    async fn await_transfer_settled(&self, stream_id: u64) -> Result<(), ServiceError> {
+        let deadline = tokio::time::Instant::now() + TRANSFER_SETTLE_TIMEOUT;
+        loop {
+            let view = self.views.load();
+            let Some(pending) = view.state.pending_transfers.get(&stream_id).copied() else {
+                return Ok(());
+            };
+            if pending.to_node != self.node.node_id() {
+                return Err(ServiceError::with_message(
+                    ErrorKind::Conflict,
+                    None,
+                    false,
+                    format!(
+                        "stream {stream_id} is transferring to node {}",
+                        pending.to_node
+                    ),
+                ));
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(ServiceError::with_message(
+                    ErrorKind::Conflict,
+                    None,
+                    false,
+                    format!("stream {stream_id} transfer did not settle in time"),
+                ));
+            }
+            let _ = tokio::time::timeout(
+                TRANSFER_SETTLE_POLL,
+                self.views.wait_applied(view.applied_index + 1),
+            )
+            .await;
+        }
+    }
+
+    /// Drain and close a locally held stream so a pending transfer can
+    /// complete. Returns the epoch the stream closed at, or `None` when this
+    /// process does not hold it open.
+    pub async fn release_for_transfer(&self, stream_id: u64) -> Result<Option<i64>, ServiceError> {
+        let name = self.name_of(stream_id).await;
+        let gate = name.as_deref().map(|n| self.gate_of(n));
+        let _op = match &gate {
+            Some(gate) => Some(gate.op.lock().await),
+            None => None,
+        };
+
+        let held = self.open_streams.lock().unwrap().remove(&stream_id);
+        let Some(stream) = held else {
+            return Ok(None);
+        };
+        self.local_epochs.lock().unwrap().remove(&stream_id);
+        let epoch = stream.stream_epoch() as i64;
+        stream.close().await?;
+        if let (Some(name), Some(gate)) = (&name, &gate) {
+            gate.tail.lock().unwrap().reset();
+            self.waiters.notify_closed(name);
+        }
+        Ok(Some(epoch))
+    }
+
+    /// Reverse registry lookup. Transfers are rare, so the fallback scan over
+    /// the KV plane is acceptable.
+    async fn name_of(&self, stream_id: u64) -> Option<String> {
+        let cached = self
+            .entry_cache
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, entry)| entry.stream_id == stream_id)
+            .map(|(name, _)| name.clone());
+        if cached.is_some() {
+            return cached;
+        }
+        let entries = self.kv_client.list_kv("/").await.ok()?;
+        entries
+            .into_iter()
+            .find(|kv| {
+                RegistryEntry::decode(&kv.value).is_ok_and(|entry| entry.stream_id == stream_id)
+            })
+            .map(|kv| kv.key)
     }
 
     fn next_epoch(&self, stream_id: u64) -> u64 {

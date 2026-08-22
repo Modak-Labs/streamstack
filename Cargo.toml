@@ -60,6 +60,8 @@ base64 = "0.22"
 tokio-stream = "0.1"
 # RFC3339 instants for Pico-Expires-At (PORT of Java `Instant.parse/toString`).
 humantime = "2"
+# The admin dashboard's prebuilt assets, compiled into the binary.
+rust-embed = "8"
 
 bytes = "1"
 # Latency percentiles for `pico bench`; Java's BenchStats reports averages only.
@@ -85,7 +87,7 @@ im = "15"
 # Lock-free published metadata views (single writer, many readers).
 arc-swap = "1"
 # The metadata plane's durable command log lives in a SQL database
-# (RisingWave-style: delegate durability/ordering to SQLite or Postgres instead
+# (delegate durability/ordering to SQLite or Postgres instead
 # of embedding consensus). The DB only ever sees opaque codec blobs.
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",

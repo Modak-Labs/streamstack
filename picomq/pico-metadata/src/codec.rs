@@ -269,6 +269,28 @@ fn put_command_body(buf: &mut BytesMut, command: &MetadataCommand) {
         MetadataCommand::DeleteKv { key } => {
             put_str(buf, key);
         }
+        MetadataCommand::TransferStream {
+            stream_id,
+            from_node,
+            to_node,
+        } => {
+            buf.put_u64_le(*stream_id);
+            buf.put_i32_le(*from_node);
+            buf.put_i32_le(*to_node);
+        }
+        MetadataCommand::CompleteTransfer { stream_id, epoch } => {
+            buf.put_u64_le(*stream_id);
+            buf.put_i64_le(*epoch);
+        }
+        MetadataCommand::CreateStreams {
+            node_id,
+            node_epoch,
+            count,
+        } => {
+            buf.put_i32_le(*node_id);
+            buf.put_i64_le(*node_epoch);
+            buf.put_u32_le(*count);
+        }
         MetadataCommand::PlaceStream { stream_id } => {
             buf.put_u64_le(*stream_id);
         }
@@ -370,11 +392,23 @@ fn get_command_body(buf: &mut &[u8]) -> Result<MetadataCommand, CodecError> {
             value: get_blob(buf)?,
         },
         14 => MetadataCommand::DeleteKv { key: get_str(buf)? },
+        15 => MetadataCommand::TransferStream {
+            stream_id: get_u64(buf)?,
+            from_node: get_i32(buf)?,
+            to_node: get_i32(buf)?,
+        },
+        16 => MetadataCommand::CompleteTransfer {
+            stream_id: get_u64(buf)?,
+            epoch: get_i64(buf)?,
+        },
+        17 => MetadataCommand::CreateStreams {
+            node_id: get_i32(buf)?,
+            node_epoch: get_i64(buf)?,
+            count: get_u32(buf)?,
+        },
         18 => MetadataCommand::PlaceStream {
             stream_id: get_u64(buf)?,
         },
-        // 15..=17 reserved for TransferStream / CompleteTransfer / CreateStreams
-        // (see `command.rs`): unknown until implemented.
         other => return Err(CodecError::UnknownCommand(other)),
     })
 }
@@ -677,6 +711,20 @@ mod tests {
                 slots: 1,
             },
             MetadataCommand::PlaceStream { stream_id: 42 },
+            MetadataCommand::TransferStream {
+                stream_id: 3,
+                from_node: 7,
+                to_node: 8,
+            },
+            MetadataCommand::CompleteTransfer {
+                stream_id: 3,
+                epoch: 9,
+            },
+            MetadataCommand::CreateStreams {
+                node_id: 7,
+                node_epoch: 100,
+                count: 16,
+            },
             MetadataCommand::CleanDestroyedObjects {
                 object_ids: vec![1, 2, 3],
             },
@@ -751,9 +799,8 @@ mod tests {
             Err(CodecError::UnsupportedVersion(v)) if v == CODEC_VERSION + 1
         ));
 
-        // Reserved codes 15..=17 and anything above must be rejected, never
-        // misparsed (keeps old binaries safe against future log entries).
-        for type_code in [0u8, 15, 16, 17, 200] {
+        // Unknown codes must be rejected, never misparsed.
+        for type_code in [0u8, 19, 200] {
             let bytes = [CODEC_VERSION, type_code];
             assert!(matches!(
                 decode_command(&bytes),
@@ -838,6 +885,23 @@ mod tests {
                 }
             ),
             any::<u64>().prop_map(|stream_id| MetadataCommand::PlaceStream { stream_id }),
+            (any::<u64>(), any::<i32>(), any::<i32>()).prop_map(
+                |(stream_id, from_node, to_node)| MetadataCommand::TransferStream {
+                    stream_id,
+                    from_node,
+                    to_node,
+                }
+            ),
+            (any::<u64>(), any::<i64>()).prop_map(|(stream_id, epoch)| {
+                MetadataCommand::CompleteTransfer { stream_id, epoch }
+            }),
+            (any::<i32>(), any::<i64>(), any::<u32>()).prop_map(|(node_id, node_epoch, count)| {
+                MetadataCommand::CreateStreams {
+                    node_id,
+                    node_epoch,
+                    count,
+                }
+            }),
             proptest::collection::vec(any::<u64>(), 0..64)
                 .prop_map(|object_ids| MetadataCommand::CleanDestroyedObjects { object_ids }),
             (

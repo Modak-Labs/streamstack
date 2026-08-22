@@ -16,6 +16,7 @@ use s3stream::{
 use crate::error::ServiceError;
 use crate::ownership::MetadataOwnershipService;
 use crate::service::S3StreamService;
+use crate::transfer::TransferWatcher;
 use crate::waiter::StreamWaiterRegistry;
 
 /// The node identity + engine tuning the host passes in.
@@ -54,6 +55,7 @@ pub struct PicoNode {
     engine: S3StreamEngine,
     service: Arc<S3StreamService>,
     ownership: Arc<MetadataOwnershipService>,
+    transfer_watcher: tokio::task::JoinHandle<()>,
 }
 
 impl PicoNode {
@@ -105,6 +107,8 @@ impl PicoNode {
             config.http_address.clone(),
             service.clone(),
         ));
+        let transfer_watcher =
+            TransferWatcher::spawn(service.clone(), views.clone(), config.node_id);
 
         Ok(Self {
             config,
@@ -113,6 +117,7 @@ impl PicoNode {
             engine,
             service,
             ownership,
+            transfer_watcher,
         })
     }
 
@@ -140,6 +145,22 @@ impl PicoNode {
         &self.handle
     }
 
+    /// Request a live ownership move of a named stream to another node.
+    pub async fn transfer_stream(&self, name: &str, to_node: i32) -> Result<u64, ServiceError> {
+        let Some(stream_id) = self.service.lookup_stream_id(name).await? else {
+            return Err(ServiceError::kind(crate::ErrorKind::NotFound));
+        };
+        let view = self.views.load();
+        let Some(row) = view.state.streams.get(&stream_id).copied() else {
+            return Err(ServiceError::kind(crate::ErrorKind::NotFound));
+        };
+        self.handle
+            .propose_transfer(stream_id, row.node_id, to_node)
+            .await
+            .map_err(|e| e.to_stream_error())?;
+        Ok(stream_id)
+    }
+
     pub fn views(&self) -> Arc<ViewPublisher> {
         self.views.clone()
     }
@@ -149,6 +170,7 @@ impl PicoNode {
     }
 
     pub async fn close(&self) {
+        self.transfer_watcher.abort();
         self.service.shutdown().await;
         self.engine.shutdown().await;
     }

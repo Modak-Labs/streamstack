@@ -504,6 +504,240 @@ async fn ownership_routes_to_open_owner() {
     node2.close().await;
 }
 
+/// Nodes sharing one object and WAL bucket, as a cluster shares S3.
+/// The WAL prefixes by cluster/node/epoch, so one bucket is safe.
+async fn start_shared_node(
+    node_id: i32,
+    node_epoch: i64,
+    sink: Arc<dyn CommandSink>,
+    views: Arc<ViewPublisher>,
+    object_storage: Arc<dyn ObjectStorageTrait>,
+    wal_storage: Arc<dyn ObjectStorageTrait>,
+) -> PicoNode {
+    PicoNode::start(
+        NodeConfig {
+            node_id,
+            node_epoch,
+            http_address: format!("http://127.0.0.1:{}", 4000 + node_id),
+            ..Default::default()
+        },
+        sink,
+        views,
+        object_storage,
+        wal_storage,
+    )
+    .await
+    .unwrap()
+}
+
+async fn wait_for_view(
+    views: &ViewPublisher,
+    what: &str,
+    satisfied: impl Fn(&pico_metadata::MetadataView) -> bool,
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if satisfied(&views.load()) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// A live transfer: the source drains and closes, the completion re-points
+/// the stream, the target pre-warms it, and appends continue on the target
+/// with full data continuity. Appends racing the transfer either land
+/// durably (and survive the move) or fail with a transfer conflict.
+#[tokio::test]
+async fn transfer_moves_stream_to_target_node() {
+    let (sink, views) = LocalSink::new();
+    let sink: Arc<dyn CommandSink> = Arc::new(sink);
+    let object_storage: Arc<dyn ObjectStorageTrait> = Arc::new(MemoryObjectStorage::new(0));
+    let wal_storage: Arc<dyn ObjectStorageTrait> = Arc::new(MemoryObjectStorage::new(1));
+    let node1 = start_shared_node(
+        1,
+        1,
+        sink.clone(),
+        views.clone(),
+        object_storage.clone(),
+        wal_storage.clone(),
+    )
+    .await;
+    let node2 = start_shared_node(
+        2,
+        1,
+        sink.clone(),
+        views.clone(),
+        object_storage,
+        wal_storage,
+    )
+    .await;
+
+    node1
+        .service()
+        .create(create("/xfer/a", "text/plain"))
+        .await
+        .unwrap();
+    node1
+        .service()
+        .append(append("/xfer/a", &[b"before"], "text/plain"))
+        .await
+        .unwrap();
+
+    // Appends race the transfer proposal. Every Ok append is durable and must
+    // survive the move. Acceptable failures are the transfer conflict while
+    // the move is pending and the open refusal once the target holds the
+    // stream. Both surface before any data is written.
+    let racer = {
+        let services = node1.service();
+        tokio::spawn(async move {
+            let mut applied = 0u64;
+            for i in 0..20u8 {
+                match services
+                    .append(append("/xfer/a", &[&[i]], "text/plain"))
+                    .await
+                {
+                    Ok(_) => applied += 1,
+                    Err(e) => {
+                        assert!(
+                            matches!(e.kind, ErrorKind::Conflict | ErrorKind::BadRequest),
+                            "unexpected failure {e:?}"
+                        );
+                        break;
+                    }
+                }
+            }
+            applied
+        })
+    };
+    let stream_id = node1.transfer_stream("/xfer/a", 2).await.unwrap();
+    let raced = racer.await.unwrap();
+
+    wait_for_view(&views, "transfer completion", |view| {
+        !view.state.pending_transfers.contains_key(&stream_id)
+            && view
+                .state
+                .streams
+                .get(&stream_id)
+                .is_some_and(|row| row.node_id == 2)
+    })
+    .await;
+    // Pre-warm: the target opens the stream without any client request.
+    wait_for_view(&views, "target pre-warm open", |view| {
+        view.state
+            .streams
+            .get(&stream_id)
+            .is_some_and(|row| row.state == s3stream::StreamState::Opened && row.node_id == 2)
+    })
+    .await;
+
+    // Every node now routes the stream to node 2.
+    let owner = node1.ownership().owner_of("/xfer/a").await.unwrap();
+    assert!(!owner.local);
+    assert_eq!(owner.owner_node_id, Some(2));
+    assert!(node2.ownership().owner_of("/xfer/a").await.unwrap().local);
+
+    // Continuity: the target serves the full history plus new appends.
+    let appended = node2
+        .service()
+        .append(append("/xfer/a", &[b"after"], "text/plain"))
+        .await
+        .unwrap();
+    assert!(appended.applied);
+    let all = node2
+        .service()
+        .read("/xfer/a", OffsetToken::beginning(), 1 << 20, 0)
+        .await
+        .unwrap();
+    assert_eq!(all.records.len() as u64, 2 + raced);
+    assert_eq!(&all.records[0].payload[..], b"before");
+    assert_eq!(&all.records.last().unwrap().payload[..], b"after");
+
+    node1.close().await;
+    node2.close().await;
+}
+
+/// Crash window: the source dies after the transfer was requested but before
+/// it completed. When the source comes back (bumped epoch), its watcher seals
+/// the stream at its last epoch and finishes the transfer.
+#[tokio::test]
+async fn stale_transfer_completes_when_source_restarts() {
+    use pico_metadata::MetadataCommand;
+
+    let (sink, views) = LocalSink::new();
+    let sink: Arc<dyn CommandSink> = Arc::new(sink);
+    let object_storage: Arc<dyn ObjectStorageTrait> = Arc::new(MemoryObjectStorage::new(0));
+    let wal_storage: Arc<dyn ObjectStorageTrait> = Arc::new(MemoryObjectStorage::new(1));
+    let node2 = start_shared_node(
+        2,
+        1,
+        sink.clone(),
+        views.clone(),
+        object_storage.clone(),
+        wal_storage.clone(),
+    )
+    .await;
+
+    // A crashed node 1 left behind: registered, one stream opened, a transfer
+    // requested but never completed. Raw proposals stand in for the process
+    // that no longer exists.
+    sink.propose(MetadataCommand::RegisterNode {
+        node_id: 1,
+        node_epoch: 1,
+        http_address: "http://127.0.0.1:4001".into(),
+        slots: 1,
+    })
+    .await
+    .unwrap();
+    sink.propose(MetadataCommand::CreateStream {
+        node_id: 1,
+        node_epoch: 1,
+    })
+    .await
+    .unwrap();
+    let stream_id = views.load().state.next_stream_id - 1;
+    sink.propose(MetadataCommand::OpenStream {
+        node_id: 1,
+        node_epoch: 1,
+        stream_id,
+        epoch: 5,
+    })
+    .await
+    .unwrap();
+    sink.propose(MetadataCommand::TransferStream {
+        stream_id,
+        from_node: 1,
+        to_node: 2,
+    })
+    .await
+    .unwrap();
+    assert!(views
+        .load()
+        .state
+        .pending_transfers
+        .contains_key(&stream_id));
+
+    // The source restarts at a bumped epoch and its watcher converges the
+    // stale transfer.
+    let node1 = start_shared_node(1, 2, sink, views.clone(), object_storage, wal_storage).await;
+    wait_for_view(&views, "stale transfer completion", |view| {
+        !view.state.pending_transfers.contains_key(&stream_id)
+            && view
+                .state
+                .streams
+                .get(&stream_id)
+                .is_some_and(|row| row.node_id == 2)
+    })
+    .await;
+
+    node1.close().await;
+    node2.close().await;
+}
+
 /// Registry entries and data survive a node restart: the KV plane holds the
 /// registry (the entry cache is a cache, not the source of truth) and the
 /// shared object storage holds the data.

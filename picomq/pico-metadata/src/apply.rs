@@ -12,7 +12,9 @@ use s3stream::{
 
 use crate::command::{MetadataCommand, MetadataResult};
 use crate::error::MetadataError;
-use crate::state::{MetadataState, NodeRow, StreamObjectRow, StreamRow, StreamSetObjectRow};
+use crate::state::{
+    MetadataState, NodeRow, PendingTransfer, StreamObjectRow, StreamRow, StreamSetObjectRow,
+};
 
 /// Apply one command. On `Ok` the state advanced, on `Err` it is untouched.
 ///
@@ -104,6 +106,19 @@ fn apply_inner(
         MetadataCommand::PutKv { key, value } => put_kv(state, key, value),
         MetadataCommand::PutKvIfAbsent { key, value } => put_kv_if_absent(state, key, value),
         MetadataCommand::DeleteKv { key } => delete_kv(state, key),
+        MetadataCommand::TransferStream {
+            stream_id,
+            from_node,
+            to_node,
+        } => transfer_stream(state, *stream_id, *from_node, *to_node),
+        MetadataCommand::CompleteTransfer { stream_id, epoch } => {
+            complete_transfer(state, *stream_id, *epoch)
+        }
+        MetadataCommand::CreateStreams {
+            node_id,
+            node_epoch,
+            count,
+        } => create_streams(state, *node_id, *node_epoch, *count),
     }
 }
 
@@ -191,8 +206,46 @@ fn create_stream(
     Ok(MetadataResult::Id(stream_id))
 }
 
-/// RisingWave-inspired slot-weighted placement. Pick the
-/// registered node with the lowest `(opening + placed) / slots` score
+/// Bounds one log row.
+const MAX_CREATE_STREAMS: u32 = 4096;
+
+/// Batched create. Ids are consecutive starting at the returned first id.
+fn create_streams(
+    state: &mut MetadataState,
+    node_id: i32,
+    node_epoch: i64,
+    count: u32,
+) -> Result<MetadataResult, MetadataError> {
+    node_epoch_check(state, node_id, node_epoch)?;
+    if count == 0 {
+        return Err(MetadataError::Unexpected {
+            message: "create count must be positive".into(),
+        });
+    }
+    if count > MAX_CREATE_STREAMS {
+        return Err(MetadataError::Unexpected {
+            message: format!("create count {count} exceeds {MAX_CREATE_STREAMS}"),
+        });
+    }
+    let first = state.next_stream_id;
+    for stream_id in first..first + count as u64 {
+        state.streams.insert(
+            stream_id,
+            StreamRow {
+                stream_id,
+                epoch: -1,
+                start_offset: 0,
+                end_offset: 0,
+                state: StreamState::Closed,
+                node_id: -1,
+            },
+        );
+    }
+    state.next_stream_id = first + count as u64;
+    Ok(MetadataResult::Id(first))
+}
+
+/// Pick the registered node with the lowest `(opening + placed) / slots` score
 /// (×1000 for integer arithmetic), tie-breaking on lowest `node_id`. A CLOSED
 /// stream with `epoch == -1` and `node_id != -1` is already placed. OPENED
 /// streams and CLOSED streams with `epoch != -1` (post-close) are idempotent
@@ -415,6 +468,96 @@ fn close_stream(
     Ok(MetadataResult::Unit)
 }
 
+/// Record a pending ownership move. The stream must be OPENED on `from_node`
+/// and the target must be a registered node with capacity. Re-requesting the
+/// same move is idempotent.
+fn transfer_stream(
+    state: &mut MetadataState,
+    stream_id: u64,
+    from_node: i32,
+    to_node: i32,
+) -> Result<MetadataResult, MetadataError> {
+    let stream = require_stream(state, stream_id)?;
+
+    if let Some(pending) = state.pending_transfers.get(&stream_id) {
+        if pending.from_node == from_node && pending.to_node == to_node {
+            return Ok(MetadataResult::Unit);
+        }
+        return Err(MetadataError::Unexpected {
+            message: format!(
+                "stream {stream_id} already transferring from {} to {}",
+                pending.from_node, pending.to_node
+            ),
+        });
+    }
+    if from_node == to_node {
+        return Err(MetadataError::Unexpected {
+            message: format!("stream {stream_id} transfer target equals source {from_node}"),
+        });
+    }
+    match state.nodes.get(&to_node) {
+        Some(node) if node.slots >= 1 => {}
+        _ => {
+            return Err(MetadataError::NodeEpochMismatch {
+                node_id: to_node,
+                message: format!("transfer target {to_node} is not a registered node with slots"),
+            });
+        }
+    }
+    if stream.state != StreamState::Opened || stream.node_id != from_node {
+        return Err(MetadataError::Unexpected {
+            message: format!(
+                "stream {stream_id} is not opened on node {from_node}, state {:?} node {}",
+                stream.state, stream.node_id
+            ),
+        });
+    }
+
+    state
+        .pending_transfers
+        .insert(stream_id, PendingTransfer { from_node, to_node });
+    Ok(MetadataResult::Unit)
+}
+
+/// Finish a pending move once the source closed the stream at `epoch`.
+/// Re-points the row at the target so routing lands there before the next
+/// open. A missing pending entry is a redundant completion.
+fn complete_transfer(
+    state: &mut MetadataState,
+    stream_id: u64,
+    epoch: i64,
+) -> Result<MetadataResult, MetadataError> {
+    let Some(pending) = state.pending_transfers.get(&stream_id).copied() else {
+        return Err(MetadataError::Redundant {
+            message: format!("no pending transfer for stream {stream_id}"),
+        });
+    };
+    let stream = require_stream(state, stream_id)?;
+    if stream.state != StreamState::Closed {
+        return Err(MetadataError::StreamNotClosed { stream_id });
+    }
+    if stream.epoch != epoch {
+        return Err(MetadataError::ExpiredEpoch {
+            stream_id,
+            epoch,
+            message: format!(
+                "stream {stream_id} epoch {epoch} is not equal to current epoch {}",
+                stream.epoch
+            ),
+        });
+    }
+
+    state.streams.insert(
+        stream_id,
+        StreamRow {
+            node_id: pending.to_node,
+            ..stream
+        },
+    );
+    state.pending_transfers.remove(&stream_id);
+    Ok(MetadataResult::Unit)
+}
+
 /// Delete a stream. A missing stream is idempotent success. The stream must
 /// be CLOSED at the exact epoch. Every stream object of the stream is dropped
 /// from the indexes and marked destroyed (`Delete`), all in the same atomic
@@ -446,6 +589,7 @@ fn delete_stream(
 
     state.streams.remove(&stream_id);
     remove_placed_stream(state, stream_id);
+    state.pending_transfers.remove(&stream_id);
 
     let keys: Vec<_> = state
         .stream_objects
@@ -1582,6 +1726,13 @@ mod tests {
         for (seq, (id, _)) in state.mark_destroyed.iter() {
             assert_eq!(state.destroyed_by_id.get(id), Some(seq), "destroyed_by_id");
         }
+
+        for (stream_id, _) in state.pending_transfers.iter() {
+            assert!(
+                state.streams.contains_key(stream_id),
+                "pending transfer references a missing stream"
+            );
+        }
     }
 
     mod properties {
@@ -1624,6 +1775,24 @@ mod tests {
                         stream_id: s,
                         epoch: e,
                     }
+                }),
+                (stream_id.clone(), 1i32..3, 1i32..3).prop_map(|(s, from, to)| {
+                    MetadataCommand::TransferStream {
+                        stream_id: s,
+                        from_node: from,
+                        to_node: to,
+                    }
+                }),
+                (stream_id.clone(), epoch.clone()).prop_map(|(s, e)| {
+                    MetadataCommand::CompleteTransfer {
+                        stream_id: s,
+                        epoch: e,
+                    }
+                }),
+                (node.clone(), 1u32..4).prop_map(|((n, ne), c)| MetadataCommand::CreateStreams {
+                    node_id: n,
+                    node_epoch: ne,
+                    count: c,
                 }),
                 (node.clone(), 1u32..3, 0i64..100).prop_map(|((n, ne), c, now)| {
                     MetadataCommand::PrepareObject {
@@ -1830,5 +1999,208 @@ mod tests {
         let restored = crate::snapshot::decode(&crate::snapshot::encode(&state)).unwrap();
         assert_eq!(restored.placed_by_node, before);
         assert_eq!(restored, state);
+    }
+
+    fn transfer(
+        state: &mut MetadataState,
+        stream_id: u64,
+        from_node: i32,
+        to_node: i32,
+    ) -> Result<MetadataResult, MetadataError> {
+        apply(
+            state,
+            &MetadataCommand::TransferStream {
+                stream_id,
+                from_node,
+                to_node,
+            },
+        )
+    }
+
+    fn complete(
+        state: &mut MetadataState,
+        stream_id: u64,
+        epoch: i64,
+    ) -> Result<MetadataResult, MetadataError> {
+        apply(
+            state,
+            &MetadataCommand::CompleteTransfer { stream_id, epoch },
+        )
+    }
+
+    #[test]
+    fn transfer_records_pending_and_is_idempotent() {
+        let mut state = setup();
+        let stream_id = create(&mut state, NODE_1, EPOCH_1);
+        open(&mut state, NODE_1, EPOCH_1, stream_id, 1).unwrap();
+
+        transfer(&mut state, stream_id, NODE_1, NODE_2).unwrap();
+        let pending = state.pending_transfers.get(&stream_id).unwrap();
+        assert_eq!((pending.from_node, pending.to_node), (NODE_1, NODE_2));
+
+        let after_first = state.clone();
+        transfer(&mut state, stream_id, NODE_1, NODE_2).unwrap();
+        assert_eq!(state, after_first);
+
+        let err = transfer(&mut state, stream_id, NODE_2, NODE_1).unwrap_err();
+        assert_eq!(err.code(), 99);
+        assert_eq!(state, after_first);
+    }
+
+    #[test]
+    fn transfer_requires_opened_on_source_and_registered_target() {
+        let mut state = setup();
+        let stream_id = create(&mut state, NODE_1, EPOCH_1);
+
+        // Closed stream cannot transfer.
+        assert_eq!(
+            transfer(&mut state, stream_id, NODE_1, NODE_2)
+                .unwrap_err()
+                .code(),
+            99
+        );
+        open(&mut state, NODE_1, EPOCH_1, stream_id, 1).unwrap();
+
+        // Wrong source node.
+        assert_eq!(
+            transfer(&mut state, stream_id, NODE_2, NODE_1)
+                .unwrap_err()
+                .code(),
+            99
+        );
+        // Unregistered target.
+        assert_eq!(
+            transfer(&mut state, stream_id, NODE_1, 9)
+                .unwrap_err()
+                .code(),
+            5
+        );
+        // Self transfer.
+        assert_eq!(
+            transfer(&mut state, stream_id, NODE_1, NODE_1)
+                .unwrap_err()
+                .code(),
+            99
+        );
+        // Missing stream.
+        assert_eq!(
+            transfer(&mut state, 999, NODE_1, NODE_2)
+                .unwrap_err()
+                .code(),
+            1
+        );
+        assert!(state.pending_transfers.is_empty());
+    }
+
+    #[test]
+    fn complete_transfer_repoints_stream_and_clears_pending() {
+        let mut state = setup();
+        let stream_id = create(&mut state, NODE_1, EPOCH_1);
+        open(&mut state, NODE_1, EPOCH_1, stream_id, 1).unwrap();
+        transfer(&mut state, stream_id, NODE_1, NODE_2).unwrap();
+
+        // Not closed yet.
+        assert_eq!(complete(&mut state, stream_id, 1).unwrap_err().code(), 2);
+
+        close(&mut state, NODE_1, EPOCH_1, stream_id, 1).unwrap();
+        // Wrong epoch.
+        assert_eq!(complete(&mut state, stream_id, 0).unwrap_err().code(), 4);
+
+        complete(&mut state, stream_id, 1).unwrap();
+        let row = state.streams.get(&stream_id).unwrap();
+        assert_eq!(row.node_id, NODE_2);
+        assert_eq!(row.state, StreamState::Closed);
+        assert!(state.pending_transfers.is_empty());
+        assert!(state.placed_by_node.is_empty());
+
+        // Redundant completion.
+        assert!(complete(&mut state, stream_id, 1)
+            .unwrap_err()
+            .is_redundant());
+
+        // The target opens with a bumped epoch.
+        open(&mut state, NODE_2, EPOCH_2, stream_id, 2).unwrap();
+        assert_eq!(state.streams.get(&stream_id).unwrap().node_id, NODE_2);
+        assert!(state.opening_by_node.contains_key(&(NODE_2, stream_id)));
+    }
+
+    #[test]
+    fn delete_stream_clears_pending_transfer() {
+        let mut state = setup();
+        let stream_id = create(&mut state, NODE_1, EPOCH_1);
+        open(&mut state, NODE_1, EPOCH_1, stream_id, 1).unwrap();
+        transfer(&mut state, stream_id, NODE_1, NODE_2).unwrap();
+        close(&mut state, NODE_1, EPOCH_1, stream_id, 1).unwrap();
+        apply(
+            &mut state,
+            &MetadataCommand::DeleteStream {
+                node_id: NODE_1,
+                node_epoch: EPOCH_1,
+                stream_id,
+                epoch: 1,
+            },
+        )
+        .unwrap();
+        assert!(state.pending_transfers.is_empty());
+    }
+
+    #[test]
+    fn create_streams_assigns_consecutive_ids() {
+        let mut state = setup();
+        let single = create(&mut state, NODE_1, EPOCH_1);
+        let result = apply(
+            &mut state,
+            &MetadataCommand::CreateStreams {
+                node_id: NODE_1,
+                node_epoch: EPOCH_1,
+                count: 3,
+            },
+        )
+        .unwrap();
+        assert_eq!(result, MetadataResult::Id(single + 1));
+        for id in single + 1..single + 4 {
+            let row = state.streams.get(&id).unwrap();
+            assert_eq!(row.epoch, -1);
+            assert_eq!(row.node_id, -1);
+            assert_eq!(row.state, StreamState::Closed);
+        }
+        assert_eq!(state.next_stream_id, single + 4);
+    }
+
+    #[test]
+    fn create_streams_validates_count_and_epoch() {
+        let mut state = setup();
+        let before = state.clone();
+        let err = apply(
+            &mut state,
+            &MetadataCommand::CreateStreams {
+                node_id: NODE_1,
+                node_epoch: EPOCH_1,
+                count: 0,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), 99);
+        let err = apply(
+            &mut state,
+            &MetadataCommand::CreateStreams {
+                node_id: NODE_1,
+                node_epoch: EPOCH_1,
+                count: MAX_CREATE_STREAMS + 1,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), 99);
+        let err = apply(
+            &mut state,
+            &MetadataCommand::CreateStreams {
+                node_id: NODE_1,
+                node_epoch: EPOCH_1 + 1,
+                count: 1,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), 5);
+        assert_eq!(state, before);
     }
 }

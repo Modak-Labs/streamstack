@@ -15,6 +15,10 @@ docs/node_modules/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 
+# Dashboard
+dashboard/node_modules/
+picomq/pico-frontend/_dashboard/
+
 # Local runtime state
 /data/
 /objects/

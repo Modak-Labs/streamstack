@@ -56,6 +56,9 @@ pub struct ServeOptions {
     /// kernel clamps this to `somaxconn` (128 on macOS, 4096 on current
     /// Linux), so asking for more is a ceiling, not a guarantee.
     pub backlog: i32,
+    /// Maintenance-lease holdership for the admin API, when the host runs a
+    /// lease keeper. `None` reports `leaseHolder: null`.
+    pub leadership: Option<watch::Receiver<bool>>,
 }
 
 impl Default for ServeOptions {
@@ -70,6 +73,7 @@ impl Default for ServeOptions {
             max_chunk_size: 64 * 1024,
             shutdown_drain: Duration::ZERO,
             backlog: 1024,
+            leadership: None,
         }
     }
 }
@@ -115,7 +119,7 @@ pub async fn serve(node: Arc<PicoNode>, options: ServeOptions) -> std::io::Resul
     };
 
     let (stop, _) = watch::channel(false);
-    let admin = AdminState::new(node.clone());
+    let admin = AdminState::new(node.clone()).with_leadership(options.leadership.clone());
     let mut tasks = Vec::with_capacity(2);
 
     let (local_addr, task) =

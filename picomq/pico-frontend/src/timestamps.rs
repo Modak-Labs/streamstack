@@ -1,9 +1,8 @@
 //! Server-assigned monotonic per-stream timestamps for the Pico protocol.
 //!
-//! `next` returns
-//! `max(now_ms, last + 1)`. The last timestamp is cached per stream and
-//! lazily read back from the tail record's envelope after a restart (any
-//! decode failure means "no history": 0).
+//! `next` returns `max(now_ms, last + 1)`. The last timestamp is cached per
+//! stream and lazily read back from the tail record's envelope after a
+//! restart (any decode failure means "no history": 0).
 
 use pico_common::now_ms;
 use std::collections::HashMap;
@@ -41,7 +40,6 @@ impl StreamTimestamps {
         Ok(now_ms().max(last + 1))
     }
 
-    /// `).
     pub fn record(&self, name: &str, timestamp: i64) {
         let mut map = self.last_by_name.lock().expect("timestamps poisoned");
         let entry = map.entry(name.to_owned()).or_insert(timestamp);

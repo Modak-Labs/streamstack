@@ -118,6 +118,7 @@ pub async fn start(config: ServerConfig) -> Result<PicoServer, RuntimeError> {
             max_chunk_size: config.max_chunk_size,
             shutdown_drain: config.shutdown_drain,
             backlog: config.backlog,
+            leadership: Some(lease.leadership()),
         },
     )
     .await

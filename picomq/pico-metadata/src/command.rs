@@ -1,6 +1,6 @@
 //! The replicated command set: the *only* way metadata changes.
 //!
-//! Fourteen variants with stable type codes (see the codec).
+//! Eighteen variants with stable type codes (see the codec).
 //!
 //! Why a closed command enum (and not methods mutating state): every mutation is
 //! a value that goes through the consensus log, so the state machine is
@@ -133,15 +133,31 @@ pub enum MetadataCommand {
     DeleteKv {
         key: String,
     },
-    // ------------------------------------------------------------------
-    // Reserved type codes. Do not reuse:
-    //   15 = TransferStream   { stream_id, from_node, to_node }
-    //   16 = CompleteTransfer { stream_id, epoch }
-    //   17 = CreateStreams    { node_id, node_epoch, count }   (batched create)
-    // live ownership transfer and bulk creation. See the
-    // metadata/server design notes. Added in a later phase as versioned protocol
-    // extensions. Reserving the codes here keeps old logs decodable forever.
-    // ------------------------------------------------------------------
+
+    /// Requests a live ownership move. The stream must be OPENED on
+    /// `from_node`. Records a pending transfer that the owning node observes
+    /// and completes after draining and closing.
+    TransferStream {
+        stream_id: u64,
+        from_node: i32,
+        to_node: i32,
+    },
+
+    /// Finishes a pending transfer. The stream must be CLOSED at `epoch`.
+    /// Re-points the stream at the transfer target and clears the pending
+    /// entry.
+    CompleteTransfer {
+        stream_id: u64,
+        epoch: i64,
+    },
+
+    /// Batched create. Assigns `count` consecutive stream ids and returns
+    /// the first.
+    CreateStreams {
+        node_id: i32,
+        node_epoch: i64,
+        count: u32,
+    },
 }
 
 impl MetadataCommand {
@@ -161,6 +177,9 @@ impl MetadataCommand {
             MetadataCommand::PutKv { .. } => 12,
             MetadataCommand::PutKvIfAbsent { .. } => 13,
             MetadataCommand::DeleteKv { .. } => 14,
+            MetadataCommand::TransferStream { .. } => 15,
+            MetadataCommand::CompleteTransfer { .. } => 16,
+            MetadataCommand::CreateStreams { .. } => 17,
             MetadataCommand::PlaceStream { .. } => 18,
         }
     }

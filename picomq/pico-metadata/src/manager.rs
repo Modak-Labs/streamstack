@@ -100,6 +100,68 @@ impl MetadataNodeHandle {
         Ok(())
     }
 
+    /// Refresh a registered node's placement weight at its current epoch.
+    /// The empty address keeps the node's advertised address unchanged.
+    pub async fn update_node_slots(
+        &self,
+        node_id: i32,
+        node_epoch: i64,
+        slots: u32,
+    ) -> Result<(), MetadataError> {
+        self.sink
+            .propose(MetadataCommand::RegisterNode {
+                node_id,
+                node_epoch,
+                http_address: String::new(),
+                slots,
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Request a live ownership move of a stream to another node.
+    pub async fn propose_transfer(
+        &self,
+        stream_id: u64,
+        from_node: i32,
+        to_node: i32,
+    ) -> Result<(), MetadataError> {
+        self.sink
+            .propose(MetadataCommand::TransferStream {
+                stream_id,
+                from_node,
+                to_node,
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Finish a pending move. A redundant completion is success.
+    pub async fn complete_transfer(&self, stream_id: u64, epoch: i64) -> Result<(), MetadataError> {
+        match self
+            .sink
+            .propose(MetadataCommand::CompleteTransfer { stream_id, epoch })
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) if e.is_redundant() => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Seal a stream at `epoch` directly, without going through the engine.
+    pub async fn close_stream(&self, stream_id: u64, epoch: i64) -> Result<(), MetadataError> {
+        self.sink
+            .propose(MetadataCommand::CloseStream {
+                node_id: self.node_id,
+                node_epoch: self.node_epoch,
+                stream_id,
+                epoch,
+            })
+            .await?;
+        Ok(())
+    }
+
     async fn propose(&self, command: MetadataCommand) -> Result<MetadataResult, StreamError> {
         Ok(self
             .sink

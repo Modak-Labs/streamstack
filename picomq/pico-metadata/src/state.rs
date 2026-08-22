@@ -47,6 +47,13 @@ pub struct NodeRow {
     pub slots: u32,
 }
 
+/// One in-flight ownership transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingTransfer {
+    pub from_node: i32,
+    pub to_node: i32,
+}
+
 /// One committed stream-set object: the committing node id plus the object
 /// metadata. Recovery filters on the node id.
 #[derive(Debug, Clone, PartialEq)]
@@ -87,6 +94,8 @@ pub struct MetadataState {
     /// Maintained by open/close/delete in `apply`.
     pub opening_by_node: OrdMap<(i32, u64), ()>,
     pub placed_by_node: OrdMap<(i32, u64), ()>,
+    /// In-flight ownership transfers keyed by stream id.
+    pub pending_transfers: OrdMap<u64, PendingTransfer>,
 
     pub next_object_id: u64,
     pub prepared: OrdMap<u64, i64>,
